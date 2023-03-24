@@ -41,9 +41,9 @@ fun main(args: Array<String> = emptyArray()) {
 
     try {
         val ast: Program = p.start_Program().result
-        val typechecker = TypeCheck
+        val typeChecker = TypeCheck
         val evaluator = Eval
-        typechecker.typecheckProgram(ast)
+        typeChecker.typeCheckProgram(ast)
         if (args.isNotEmpty()) {
             p = createParser(CharStreams.fromStream(System.`in`))
             val ec: stellaParser.Start_ExprContext = p.start_Expr()
