@@ -1,12 +1,13 @@
 package org.stella.typecheck
 import org.syntax.stella.Absyn.*
+import org.syntax.stella.PrettyPrinter
 
 class TypeError(message: String) : Exception(message)
 
+var globalContext = mutableMapOf<String, Pair<Type, Type>>();
 object TypeCheck {
     @Throws(Exception::class)
     fun typeCheckProgram(program: Program?) {
-
         when (program) {
             is AProgram ->
                 for (decl in program.listdecl_) {
@@ -24,16 +25,31 @@ fun typeCheckFunctionDeclaration(decl: DeclFun) {
     val context = mutableMapOf<String, Type>()
 
     var returnType = when (decl.returntype_) {
-        is SomeReturnType -> decl.returntype_.type_
+        is SomeReturnType -> {decl.returntype_.type_ }
         else -> throw TypeError("A function declaration must specify its return type.")
     }
 
     for (paramDecl in decl.listparamdecl_) {
-        context += parseParamDecl(paramDecl)
+        var params = parseParamDecl(paramDecl)
+        context += params
+
+        var paramType: Type? = null
+        for (value in params.values)
+            paramType = value
+
+        // Add func signature to global context
+        // Forced the assignment here because I know for a fact the function will have one arg with a type
+        globalContext[decl.stellaident_] = Pair(paramType!!, returnType)
     }
 
     val returnExpr = decl.expr_
     typeCheckExpression(returnExpr, returnType, context)
+}
+
+fun parseParamDecl(paramDecl: ParamDecl): Map<String, Type> = when (paramDecl) {
+    // TODO: handle case where parameter is function? do i really need to?
+    is AParamDecl -> mapOf(paramDecl.stellaident_ to paramDecl.type_)
+    else -> mapOf()
 }
 
 fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<String, Type>) {
@@ -46,27 +62,54 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
         is If -> typeCheckIf(expr, typeToMatch, context)
         is NatRec -> null //TODO: dis might be hard i tink later
         is IsZero -> typeCheckIsZero(expr, typeToMatch, context)
-        is Abstraction -> expr.listparamdecl_ //TODO: dis recursive but i need a new function
+        is Abstraction -> typeCheckAbstraction(expr, typeToMatch, context)
+        is Application -> typeCheckApplication(expr, typeToMatch, context)
     }
 }
 
-fun parseParamDecl(paramDecl: ParamDecl): Map<String, Type> = when (paramDecl) {
-    is AParamDecl -> mapOf(paramDecl.stellaident_ to paramDecl.type_)
-    else -> mapOf()
+fun typeCheckApplication(expr: Application, typeToMatch: Type?, context: MutableMap<String, Type>) {
+    when (val innerExpr = expr.expr_) {
+        is Var -> {
+            // TODO see if ? is necessary
+            val funcDeclaredArgType = globalContext[innerExpr.stellaident_]?.first
+            val funcDeclaredReturnType = globalContext[innerExpr.stellaident_]?.second
+            val funcAppliedArg = expr.listexpr_[0]
+
+            typeCheckExpression(funcAppliedArg, funcDeclaredArgType, context)
+            if (funcDeclaredReturnType != typeToMatch) {
+                println(PrettyPrinter.print(expr))
+                println(PrettyPrinter.print(funcDeclaredArgType))
+                println(PrettyPrinter.print(funcDeclaredReturnType))
+                println(PrettyPrinter.print(typeToMatch))
+                println(PrettyPrinter.print(funcAppliedArg))
+                println(PrettyPrinter.print(globalContext["Bool::xor"]?.second))
+                throw TypeError("Declared type ${PrettyPrinter.print(typeToMatch)} " +
+                        "does not match actual type ${PrettyPrinter.print(funcDeclaredReturnType)}")
+
+            }
+        }
+
+        is Application -> {
+            typeCheckApplication(innerExpr, typeToMatch, context)
+        }
+    }
 }
+
 fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, Type>) {
-    //TODO: What is NoReturnType?
+    //TODO: What is NoReturnType? return type of anon function probably
     val variableName = variable.stellaident_
     val variableType = context[variableName]
 
     // Throw error if variable type in context does not match return type
     if (variableType != typeToMatch)
-        throw TypeError("Declared return type $typeToMatch doesn't match actual type $variableType.")
+        throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
+                "does not match actual type ${PrettyPrinter.print(variableType)}.")
 }
 
 fun typeCheckBool(typeToMatch: Type?): Nothing? = when (typeToMatch) {
     // Throw error is return type is not Bool
-        !is TypeBool -> throw TypeError("Declared return type $typeToMatch doesn't match actual type Bool.")
+        !is TypeBool -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
+                "does not match actual type Bool.")
         else -> null
     }
 fun typeCheckInt(intVal: Int, typeToMatch: Type?) {
@@ -74,13 +117,14 @@ fun typeCheckInt(intVal: Int, typeToMatch: Type?) {
 
     // Throw error if number is not 0 or return type is not Nat
     if(intVal != 0 || typeToMatch !is TypeNat)
-        throw TypeError("Declared return type $typeToMatch doesn't match actual type .")
+        throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} does not match actual type.")
 }
 
 fun typeCheckSucc(succExpr:Succ, typeToMatch: Type?, context: MutableMap<String, Type>) {
     // Throw error if return type is not Nat
     when (typeToMatch) {
-        !is TypeNat -> throw TypeError("Declared return type $typeToMatch doesn't match actual type Nat.")
+        !is TypeNat -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
+                "does not match actual type Nat.")
     }
 
     // Throw error if content is not one of
@@ -92,14 +136,16 @@ fun typeCheckSucc(succExpr:Succ, typeToMatch: Type?, context: MutableMap<String,
         // a variable of type Nat
         is Var -> typeCheckVar(succContent, typeToMatch, context)
 
-        else -> throw TypeError("An argument of Succ must be of type Nat, but provided argument with type ${succContent.toString()}")
+        else -> throw TypeError("An argument of Succ must be of type Nat, " +
+                "but provided argument ${PrettyPrinter.print(succContent)}")
     }
 }
 
 fun typeCheckIsZero(isZeroExpr: IsZero, typeToMatch: Type?, context: MutableMap<String, Type>) {
     // Throw error if return type is not Bool
     when (typeToMatch) {
-        !is TypeBool -> throw TypeError("Declared return type $typeToMatch doesn't match actual type Bool.")
+        !is TypeBool -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
+                "does not match actual type Bool.")
     }
 
     // Throw error if content is not one of
@@ -111,7 +157,8 @@ fun typeCheckIsZero(isZeroExpr: IsZero, typeToMatch: Type?, context: MutableMap<
         // a variable of type Nat
         is Var -> typeCheckVar(isZeroContent, TypeNat(), context)
 
-        else -> throw TypeError("An argument of IsZero must be of type Nat, but provided argument with type ${isZeroContent.toString()}")
+        else -> throw TypeError("An argument of IsZero must be of type Nat, " +
+                "but provided argument ${PrettyPrinter.print(isZeroContent)}")
     }
 }
 
@@ -126,4 +173,34 @@ fun typeCheckIf(ifExpr: If, typeToMatch: Type?, context: MutableMap<String, Type
     // Throw error if any of the 2 branches do not match the return type of the entire construct
     typeCheckExpression(firstBranch, typeToMatch, context)
     typeCheckExpression(secondBranch, typeToMatch, context)
+}
+
+fun typeCheckAbstraction(abstraction: Abstraction, typeToMatch: Type?, outerContext: MutableMap<String, Type>) {
+    var innerContext = mutableMapOf<String, Type>()
+
+    for (paramDecl in abstraction.listparamdecl_) {
+        innerContext += parseParamDecl(paramDecl)
+    }
+
+    innerContext = (outerContext + innerContext) as MutableMap<String, Type>
+
+    val innerExpr = abstraction.expr_
+    val firstParam = abstraction.listparamdecl_[0] as AParamDecl
+
+    when (typeToMatch) {
+        is TypeFun -> {
+            typeCheckFirstParam(firstParam.type_, typeToMatch.listtype_[0])
+            typeCheckExpression(innerExpr, typeToMatch.type_, innerContext)
+        }
+
+        else -> throw TypeError("Type ${PrettyPrinter.print(typeToMatch)} " +
+                "does not match type of given Abstraction")
+    }
+}
+
+fun typeCheckFirstParam(firstParamType: Type?, typeToMatch: Type?) {
+    if (firstParamType != typeToMatch) {
+        throw TypeError("Type ${PrettyPrinter.print(firstParamType)} " +
+                "does not match declared type ${PrettyPrinter.print(typeToMatch)}")
+    }
 }
