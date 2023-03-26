@@ -1,13 +1,11 @@
 package org.stella.typecheck
 import org.syntax.stella.Absyn.*
 import org.syntax.stella.PrettyPrinter
-import java.beans.Expression
 
 class TypeError(message: String) : Exception(message)
 
 var globalContext = mutableMapOf<String, Pair<Type, Type>>();
 object TypeCheck {
-    @Throws(Exception::class)
     fun typeCheckProgram(program: Program?) {
         when (program) {
             is AProgram ->
