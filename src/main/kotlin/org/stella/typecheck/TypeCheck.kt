@@ -1,6 +1,7 @@
 package org.stella.typecheck
 import org.syntax.stella.Absyn.*
 import org.syntax.stella.PrettyPrinter
+import java.beans.Expression
 
 class TypeError(message: String) : Exception(message)
 
@@ -42,6 +43,12 @@ fun typeCheckFunctionDeclaration(decl: DeclFun) {
         globalContext[decl.stellaident_] = Pair(paramType!!, returnType)
     }
 
+//    val callerType = decl.returntype_
+//
+//    if (getExpressionType(decl.expr_, context) != callerType) {
+//        throw TypeError("Ksmk")
+//    }
+
     val returnExpr = decl.expr_
     typeCheckExpression(returnExpr, returnType, context)
 }
@@ -68,21 +75,31 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
 }
 
 fun typeCheckApplication(expr: Application, typeToMatch: Type?, context: MutableMap<String, Type>) {
+    print("Expression: ")
+    println(PrettyPrinter.print(expr))
     when (val innerExpr = expr.expr_) {
         is Var -> {
+//            println("Var")
+//            println(PrettyPrinter.print(expr.expr_))
+//            println(PrettyPrinter.print(expr.listexpr_))
             // TODO see if ? is necessary
             val funcDeclaredArgType = globalContext[innerExpr.stellaident_]?.first
             val funcDeclaredReturnType = globalContext[innerExpr.stellaident_]?.second
             val funcAppliedArg = expr.listexpr_[0]
 
+            println("Var: ")
+            print("DeclaredArgType: ")
+            println(PrettyPrinter.print(funcDeclaredArgType))
+            print("DeclaredReturnType: ")
+            println(PrettyPrinter.print(funcDeclaredReturnType))
+            print("TypeToMatch: ")
+            println(PrettyPrinter.print(typeToMatch))
+            print("FuncAppliedArg: ")
+            println(PrettyPrinter.print(funcAppliedArg))
+
             typeCheckExpression(funcAppliedArg, funcDeclaredArgType, context)
+
             if (funcDeclaredReturnType != typeToMatch) {
-                println(PrettyPrinter.print(expr))
-                println(PrettyPrinter.print(funcDeclaredArgType))
-                println(PrettyPrinter.print(funcDeclaredReturnType))
-                println(PrettyPrinter.print(typeToMatch))
-                println(PrettyPrinter.print(funcAppliedArg))
-                println(PrettyPrinter.print(globalContext["Bool::xor"]?.second))
                 throw TypeError("Declared type ${PrettyPrinter.print(typeToMatch)} " +
                         "does not match actual type ${PrettyPrinter.print(funcDeclaredReturnType)}")
 
@@ -90,9 +107,26 @@ fun typeCheckApplication(expr: Application, typeToMatch: Type?, context: Mutable
         }
 
         is Application -> {
-            typeCheckApplication(innerExpr, typeToMatch, context)
+
+            println("Application")
+            print("expr: ")
+            println(PrettyPrinter.print(expr.expr_))
+            print("listexpr: ")
+            println(PrettyPrinter.print(expr.listexpr_))
+            print("TypeToMatch: ")
+            println(PrettyPrinter.print(typeToMatch))
+//            println(PrettyPrinter.print(expr.expr_))
+            val nextApplication = getApplicationName(innerExpr)
+            val nextTypeToMatch = globalContext[nextApplication]?.first
+            typeCheckApplication(innerExpr, nextTypeToMatch, context)
         }
     }
+}
+
+fun getApplicationName(expr: Application) : String = when (val innerExpr = expr.expr_) {
+    is Var -> innerExpr.stellaident_
+    // Type cast because that's the only possible outcome
+    else -> getApplicationName(innerExpr as Application)
 }
 
 fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, Type>) {
