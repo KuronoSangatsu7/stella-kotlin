@@ -68,7 +68,7 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
     is ConstInt -> typeCheckInt(expr.integer_, typeToMatch)
     is Succ -> typeCheckSucc(expr, typeToMatch, context)
     is If -> typeCheckIf(expr, typeToMatch, context)
-    is NatRec -> null
+    is NatRec -> typeCheckNatRec(expr, typeToMatch, context)
     is IsZero -> typeCheckIsZero(expr, typeToMatch, context)
     is Abstraction -> typeCheckAbstraction(expr, typeToMatch, context)
     is Application -> typeCheckApplication(expr, typeToMatch, context)
@@ -139,13 +139,21 @@ fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, 
     return variableType
 }
 
-fun typeCheckBool(typeToMatch: Type?): Type? = when (typeToMatch) {
-    // Throw error is return type is not Bool
-    !is TypeBool -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
+fun typeCheckBool(typeToMatch: Type?): Type? {
+
+    if (typeToMatch == null)
+        return TypeBool()
+
+    when (typeToMatch) {
+        // Throw error is return type is not Bool
+        !is TypeBool -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
                 "does not match actual type Bool.")
-    else -> TypeBool()
+        else -> return TypeBool()
+    }
 }
 fun typeCheckInt(intVal: Int, typeToMatch: Type?): Type? {
+    if(typeToMatch == null)
+        return TypeNat()
     //TODO: What is type of an int num?
 
     // Throw error if number is not 0 or return type is not Nat
@@ -156,6 +164,10 @@ fun typeCheckInt(intVal: Int, typeToMatch: Type?): Type? {
 }
 
 fun typeCheckSucc(succExpr:Succ, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+
+    if (typeToMatch == null)
+        return typeCheckExpression(succExpr.expr_, TypeNat(), context)
+
     // Throw error if return type is not Nat
     when (typeToMatch) {
         !is TypeNat -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
@@ -180,6 +192,10 @@ fun typeCheckSucc(succExpr:Succ, typeToMatch: Type?, context: MutableMap<String,
 }
 
 fun typeCheckIsZero(isZeroExpr: IsZero, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+
+    if (typeToMatch == null)
+        return typeCheckExpression(isZeroExpr.expr_, TypeBool(), context)
+
     // Throw error if return type is not Bool
     when (typeToMatch) {
         !is TypeBool -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
@@ -230,7 +246,9 @@ fun typeCheckAbstraction(abstraction: Abstraction, typeToMatch: Type?, outerCont
     val firstParam = abstraction.listparamdecl_[0] as AParamDecl
 
     if (typeToMatch == null) {
-        return typeCheckExpression(innerExpr, null, innerContext)
+        val returnType = typeCheckExpression(innerExpr, null, innerContext)
+        val functionType = constructTypeFun(firstParam.type_, returnType)
+        return functionType
     }
 
     when (typeToMatch) {
