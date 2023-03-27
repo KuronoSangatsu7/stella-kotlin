@@ -37,26 +37,16 @@ fun typeCheckFunctionDeclaration(decl: DeclFun) {
         for (value in params.values)
             paramType = value
 
-        // Add func signature to global context
-        // Forced the assignment here because I know for a fact the function will have one arg with a type
-
+        // Add function signature to global context
         var functionType = constructTypeFun(paramType, returnType)
-
         globalContext[decl.stellaident_] = functionType
     }
-
-//    val callerType = decl.returntype_
-//
-//    if (getExpressionType(decl.expr_, context) != callerType) {
-//        throw TypeError("Ksmk")
-//    }
 
     val returnExpr = decl.expr_
     typeCheckExpression(returnExpr, returnType, context)
 }
 
 fun parseParamDecl(paramDecl: ParamDecl): Map<String, Type> = when (paramDecl) {
-    // TODO: handle case where parameter is function? do i really need to?
     is AParamDecl -> mapOf(paramDecl.stellaident_ to paramDecl.type_)
     else -> mapOf()
 }
@@ -75,24 +65,19 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
     else -> null
 }
 
-
 fun typeCheckApplication(expr: Application, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
     when (val functionType = typeCheckExpression(expr.expr_, null, context)) {
         is TypeFun -> {
             val firstArgExpectedType = functionType.listtype_[0]
             val applicationReturnType = functionType.type_
-            val firstArgType = typeCheckExpression(expr.listexpr_[0], firstArgExpectedType, context)
-            if (firstArgType != firstArgExpectedType) {
-                throw TypeError("Expected argument of type ${PrettyPrinter.print(firstArgExpectedType)}" +
-                        "Found ${PrettyPrinter.print(firstArgType)}" +
-                        "In Application ${PrettyPrinter.print(expr)}")
-            }
+            typeCheckExpression(expr.listexpr_[0], firstArgExpectedType, context)
 
             return applicationReturnType
         }
 
         else -> {
-            throw TypeError("ksmk")
+            throw TypeError("${PrettyPrinter.print(expr.expr_)} cannot be applied to ${PrettyPrinter.print(expr.listexpr_[0])}" +
+                    "${PrettyPrinter.print(expr.expr_)} is not a function.")
         }
     }
 }
@@ -106,25 +91,25 @@ fun typeCheckNatRec(natRec: NatRec, typeToMatch: Type?, context: MutableMap<Stri
     val thirdExprExpectedType = constructTypeFun(TypeNat(), innerReturnType)
 
     if (thirdExprType != thirdExprExpectedType) {
-        throw TypeError("NatRec done fucked up")
+        throw TypeError("Expected Third argument of Nat::rec to be of type" +
+                "fn(Nat) -> (fn(${PrettyPrinter.print(secondExprType)}) -> ${PrettyPrinter.print(secondExprType)})" +
+                "Found argument of type ${PrettyPrinter.print(thirdExprType)}")
     }
 
     return secondExprType
 }
 
 fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
-    //TODO: What is NoReturnType? return type of anon function probably
     val variableName = variable.stellaident_
-    val variableType: Type?
 
-    // Try to find the variable in context otherwise it's a function declaration then get it from global context
-
-    if (variableName in context.keys) {
-        variableType = context[variableName]
+    // Try to find the variable in context
+    // otherwise it's a function declaration
+    val variableType: Type? = if (variableName in context.keys) {
+        context[variableName]
     }
-
+    // get it from global context
     else {
-        variableType = globalContext[variableName]
+        globalContext[variableName]
     }
 
     if (typeToMatch == null) {
@@ -133,8 +118,8 @@ fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, 
 
     // Throw error if variable type in context does not match return type
     if (variableType != typeToMatch)
-        throw TypeError("ksmk return type ${PrettyPrinter.print(typeToMatch)} " +
-                "does not match actual type ${PrettyPrinter.print(variableType)}.")
+        throw TypeError("Expected ${PrettyPrinter.print(variable)} to be of type ${PrettyPrinter.print(typeToMatch)} " +
+                "Instead assigned value of type ${PrettyPrinter.print(variableType)}.")
 
     return variableType
 }
@@ -146,19 +131,19 @@ fun typeCheckBool(typeToMatch: Type?): Type? {
 
     when (typeToMatch) {
         // Throw error is return type is not Bool
-        !is TypeBool -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
-                "does not match actual type Bool.")
+        !is TypeBool -> throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)} " +
+                "Instead found argument of type Bool")
         else -> return TypeBool()
     }
 }
 fun typeCheckInt(intVal: Int, typeToMatch: Type?): Type? {
     if(typeToMatch == null)
         return TypeNat()
-    //TODO: What is type of an int num?
 
     // Throw error if number is not 0 or return type is not Nat
     if(intVal != 0 || typeToMatch !is TypeNat)
-        throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} does not match actual type.")
+        throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}" +
+                "Instead found argument of type Nat")
 
     return TypeNat()
 }
@@ -170,8 +155,8 @@ fun typeCheckSucc(succExpr:Succ, typeToMatch: Type?, context: MutableMap<String,
 
     // Throw error if return type is not Nat
     when (typeToMatch) {
-        !is TypeNat -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
-                "does not match actual type Nat.")
+        !is TypeNat -> throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)} " +
+                "Instead found argument of type Nat")
 
     }
 
@@ -247,8 +232,7 @@ fun typeCheckAbstraction(abstraction: Abstraction, typeToMatch: Type?, outerCont
 
     if (typeToMatch == null) {
         val returnType = typeCheckExpression(innerExpr, null, innerContext)
-        val functionType = constructTypeFun(firstParam.type_, returnType)
-        return functionType
+        return constructTypeFun(firstParam.type_, returnType)
     }
 
     when (typeToMatch) {
@@ -258,7 +242,7 @@ fun typeCheckAbstraction(abstraction: Abstraction, typeToMatch: Type?, outerCont
         }
 
         else -> throw TypeError("Type ${PrettyPrinter.print(typeToMatch)} " +
-                "does not match type of given Abstraction")
+                "does not match type of given abstraction ${PrettyPrinter.print(abstraction)}")
     }
 
     return typeToMatch
