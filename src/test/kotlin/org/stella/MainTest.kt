@@ -17,7 +17,9 @@ internal class MainTest {
         "$wellTypedDir/squares.stella",
         "$wellTypedDir/higher-order-1.stella",
         "$wellTypedDir/increment_twice.stella",
-        "$wellTypedDir/logical-operators.stella"
+        "$wellTypedDir/logical-operators.stella",
+        "$wellTypedDir/good-if.stella",
+        "$wellTypedDir/good-if-2.stella",
     ])
     @Throws(
         IOException::class,
@@ -41,14 +43,19 @@ internal class MainTest {
         "$illTypedDir/argument-type-mismatch-3.stella",
         "$illTypedDir/bad-if-1.stella",
         "$illTypedDir/bad-if-2.stella",
+        "$illTypedDir/bad-if-3.stella",
+        "$illTypedDir/bad-if-4.stella",
+        "$illTypedDir/bad-iszero.stella",
         "$illTypedDir/bad-succ-1.stella",
         "$illTypedDir/bad-succ-2.stella",
         "$illTypedDir/bad-succ-3.stella",
+        "$illTypedDir/invalid-nat.stella",
         "$illTypedDir/shadowed-variable-1.stella",
         "$illTypedDir/undefined-variable-1.stella",
         "$illTypedDir/undefined-variable-2.stella",
         "$illTypedDir/bad-squares-1.stella",
-        "$illTypedDir/bad-squares-2.stella"
+        "$illTypedDir/bad-squares-2.stella",
+        "$illTypedDir/bad-abstraction.stella",
     ])
     @Throws(
         IOException::class,

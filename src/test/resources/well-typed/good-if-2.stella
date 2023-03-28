@@ -1,0 +1,5 @@
+language core;
+
+fn main(x : Bool) -> Bool {
+    return (if false then fn(x : Bool) { return false; } else fn(x : Bool) { return true; } )(true);
+}

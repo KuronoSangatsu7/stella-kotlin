@@ -21,6 +21,8 @@ object TypeCheck {
     }
 }
 
+// Typechecks the contents of a function declaration against it's declared types
+// after adding it to the global scope
 fun typeCheckFunctionDeclaration(decl: DeclFun) {
     val context = mutableMapOf<String, Type>()
 
@@ -46,11 +48,17 @@ fun typeCheckFunctionDeclaration(decl: DeclFun) {
     typeCheckExpression(returnExpr, returnType, context)
 }
 
+// Writes the given parameter declarations into a map to act as the function's local scope later on
 fun parseParamDecl(paramDecl: ParamDecl): Map<String, Type> = when (paramDecl) {
     is AParamDecl -> mapOf(paramDecl.stellaident_ to paramDecl.type_)
     else -> mapOf()
 }
 
+// Typechecks a given expression against the provided typeToMatch using the given local/global scopes
+// Fails if the actual type does not match the one given
+// When given null as typeToMatch
+// it simply returns the inferred type of the expression (assuming no TypeErrors happen further down the line)
+// The same thing goes for all the typeCheck functions
 fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<String, Type>): Type? = when (expr) {
     is Var -> typeCheckVar(expr, typeToMatch, context)
     is ConstTrue -> typeCheckBool(typeToMatch)
@@ -76,7 +84,8 @@ fun typeCheckApplication(expr: Application, typeToMatch: Type?, context: Mutable
         }
 
         else -> {
-            throw TypeError("${PrettyPrinter.print(expr.expr_)} cannot be applied to ${PrettyPrinter.print(expr.listexpr_[0])}" +
+            throw TypeError("${PrettyPrinter.print(expr.expr_)} cannot " +
+                    "be applied to ${PrettyPrinter.print(expr.listexpr_[0])}\n" +
                     "${PrettyPrinter.print(expr.expr_)} is not a function.")
         }
     }
@@ -87,12 +96,13 @@ fun typeCheckNatRec(natRec: NatRec, typeToMatch: Type?, context: MutableMap<Stri
     val secondExprType = typeCheckExpression(natRec.expr_2, null, context)
     val thirdExprType = typeCheckExpression(natRec.expr_3, null, context)
 
+    // Constructing the expected type of NatRec given its arguments
     val innerReturnType = constructTypeFun(secondExprType, secondExprType)
     val thirdExprExpectedType = constructTypeFun(TypeNat(), innerReturnType)
 
     if (thirdExprType != thirdExprExpectedType) {
         throw TypeError("Expected Third argument of Nat::rec to be of type" +
-                "fn(Nat) -> (fn(${PrettyPrinter.print(secondExprType)}) -> ${PrettyPrinter.print(secondExprType)})" +
+                "fn(Nat) -> (fn(${PrettyPrinter.print(secondExprType)}) -> ${PrettyPrinter.print(secondExprType)})\n" +
                 "Found argument of type ${PrettyPrinter.print(thirdExprType)}")
     }
 
@@ -102,12 +112,12 @@ fun typeCheckNatRec(natRec: NatRec, typeToMatch: Type?, context: MutableMap<Stri
 fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
     val variableName = variable.stellaident_
 
-    // Try to find the variable in context
+    // Try to find the variable in local scope
     // otherwise it's a function declaration
     val variableType: Type? = if (variableName in context.keys) {
         context[variableName]
     }
-    // get it from global context
+    // get it from global scope
     else {
         globalContext[variableName]
     }
@@ -118,7 +128,8 @@ fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, 
 
     // Throw error if variable type in context does not match return type
     if (variableType != typeToMatch)
-        throw TypeError("Expected ${PrettyPrinter.print(variable)} to be of type ${PrettyPrinter.print(typeToMatch)} " +
+        throw TypeError("Expected ${PrettyPrinter.print(variable)} " +
+                "to be of type ${PrettyPrinter.print(typeToMatch)}\n" +
                 "Instead assigned value of type ${PrettyPrinter.print(variableType)}.")
 
     return variableType
@@ -131,7 +142,7 @@ fun typeCheckBool(typeToMatch: Type?): Type? {
 
     when (typeToMatch) {
         // Throw error is return type is not Bool
-        !is TypeBool -> throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)} " +
+        !is TypeBool -> throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
                 "Instead found argument of type Bool")
         else -> return TypeBool()
     }
@@ -142,8 +153,7 @@ fun typeCheckInt(intVal: Int, typeToMatch: Type?): Type? {
 
     // Throw error if number is not 0 or return type is not Nat
     if(intVal != 0 || typeToMatch !is TypeNat)
-        throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}" +
-                "Instead found argument of type Nat")
+        throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n")
 
     return TypeNat()
 }
@@ -155,7 +165,7 @@ fun typeCheckSucc(succExpr:Succ, typeToMatch: Type?, context: MutableMap<String,
 
     // Throw error if return type is not Nat
     when (typeToMatch) {
-        !is TypeNat -> throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)} " +
+        !is TypeNat -> throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
                 "Instead found argument of type Nat")
 
     }
@@ -169,8 +179,9 @@ fun typeCheckSucc(succExpr:Succ, typeToMatch: Type?, context: MutableMap<String,
         // a variable of type Nat
         is Var -> typeCheckVar(succContent, typeToMatch, context)
 
-        else -> throw TypeError("An argument of Succ must be of type Nat, " +
-                "but provided argument ${PrettyPrinter.print(succContent)}")
+        else -> throw TypeError("An argument of Succ must be of type Nat,\n" +
+                "but provided argument ${PrettyPrinter.print(succContent)}\n" +
+                "of type ${PrettyPrinter.print(typeCheckExpression(succContent, null, context))}")
     }
 
     return TypeNat()
@@ -183,7 +194,7 @@ fun typeCheckIsZero(isZeroExpr: IsZero, typeToMatch: Type?, context: MutableMap<
 
     // Throw error if return type is not Bool
     when (typeToMatch) {
-        !is TypeBool -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)} " +
+        !is TypeBool -> throw TypeError("Declared return type ${PrettyPrinter.print(typeToMatch)}\n" +
                 "does not match actual type Bool.")
     }
 
@@ -196,8 +207,9 @@ fun typeCheckIsZero(isZeroExpr: IsZero, typeToMatch: Type?, context: MutableMap<
         // a variable of type Nat
         is Var -> typeCheckVar(isZeroContent, TypeNat(), context)
 
-        else -> throw TypeError("An argument of IsZero must be of type Nat, " +
-                "but provided argument ${PrettyPrinter.print(isZeroContent)}")
+        else -> throw TypeError("An argument of IsZero must be of type Nat,\n" +
+                "but provided argument ${PrettyPrinter.print(isZeroContent)}\n" +
+                "of type ${PrettyPrinter.print(typeCheckExpression(isZeroExpr, null, context))}")
     }
 
     return TypeBool()
@@ -215,25 +227,30 @@ fun typeCheckIf(ifExpr: If, typeToMatch: Type?, context: MutableMap<String, Type
     val firstBranchType = typeCheckExpression(firstBranch, typeToMatch, context)
     val secondBranchType = typeCheckExpression(secondBranch, typeToMatch, context)
 
+    // Throw error if inferred types of the 2 branches do not match
     if (firstBranchType != secondBranchType)
-        throw TypeError("Branches of If statement must be of the same type." +
+        throw TypeError("Branches of If statement must be of the same type.\n" +
                 "Found ${PrettyPrinter.print(firstBranchType)} and ${PrettyPrinter.print(secondBranchType)}")
 
-    return typeToMatch
+    return firstBranchType
 }
 
 fun typeCheckAbstraction(abstraction: Abstraction, typeToMatch: Type?, outerContext: MutableMap<String, Type>): Type? {
     var innerContext = mutableMapOf<String, Type>()
 
+    // Creating local scope
     for (paramDecl in abstraction.listparamdecl_) {
         innerContext += parseParamDecl(paramDecl)
     }
 
+    // Adding previous scope to new scope
+    // Shadowing occurs naturally here as in the old values get overwritten
     innerContext = (outerContext + innerContext) as MutableMap<String, Type>
 
     val innerExpr = abstraction.expr_
     val firstParam = abstraction.listparamdecl_[0] as AParamDecl
 
+    // Returning inferred type of the Abstraction in case typeToMatch is null
     if (typeToMatch == null) {
         val returnType = typeCheckExpression(innerExpr, null, innerContext)
         return constructTypeFun(firstParam.type_, returnType)
@@ -245,21 +262,23 @@ fun typeCheckAbstraction(abstraction: Abstraction, typeToMatch: Type?, outerCont
             typeCheckExpression(innerExpr, typeToMatch.type_, innerContext)
         }
 
-        else -> throw TypeError("Type ${PrettyPrinter.print(typeToMatch)} " +
-                "does not match type of given abstraction ${PrettyPrinter.print(abstraction)}")
+        else -> throw TypeError("Type ${PrettyPrinter.print(typeToMatch)}\n" +
+                "does not match type of given abstraction ${PrettyPrinter.print(abstraction)}\n")
     }
 
     return typeToMatch
 }
 
+// Typechecking the first parameter of an application given it's expected and actual types
 fun typeCheckFirstParam(firstParamType: Type?, typeToMatch: Type?) {
     if (firstParamType != typeToMatch) {
-        throw TypeError("Type ${PrettyPrinter.print(firstParamType)} " +
+        throw TypeError("Type ${PrettyPrinter.print(firstParamType)}\n" +
                 "does not match declared type ${PrettyPrinter.print(typeToMatch)}")
     }
 }
 
-fun constructTypeFun(argType: Type?, returnType: Type?): Type {
+// Constructs a TypeFun given the type of its argument and its return type
+fun constructTypeFun(argType: Type?, returnType: Type?): TypeFun {
     val argListType = ListType()
     argListType.add(argType)
 
