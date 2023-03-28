@@ -212,8 +212,12 @@ fun typeCheckIf(ifExpr: If, typeToMatch: Type?, context: MutableMap<String, Type
     typeCheckExpression(condition, TypeBool(), context)
 
     // Throw error if any of the 2 branches do not match the return type of the entire construct
-    typeCheckExpression(firstBranch, typeToMatch, context)
-    typeCheckExpression(secondBranch, typeToMatch, context)
+    val firstBranchType = typeCheckExpression(firstBranch, typeToMatch, context)
+    val secondBranchType = typeCheckExpression(secondBranch, typeToMatch, context)
+
+    if (firstBranchType != secondBranchType)
+        throw TypeError("Branches of If statement must be of the same type." +
+                "Found ${PrettyPrinter.print(firstBranchType)} and ${PrettyPrinter.print(secondBranchType)}")
 
     return typeToMatch
 }
