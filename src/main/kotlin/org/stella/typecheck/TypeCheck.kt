@@ -2,6 +2,7 @@ package org.stella.typecheck
 import org.syntax.stella.Absyn.*
 import org.syntax.stella.PrettyPrinter
 import java.util.LinkedList
+import kotlin.reflect.typeOf
 
 class TypeError(message: String) : Exception(message)
 
@@ -61,9 +62,12 @@ fun parseParamDecl(paramDecl: ParamDecl): Map<String, Type> = when (paramDecl) {
 // The same thing goes for all the typeCheck functions
 fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<String, Type>): Type? = when (expr) {
     is Var -> typeCheckVar(expr, typeToMatch, context)
+    is Tuple -> typeCheckTuple(expr, typeToMatch, context)
+    is DotTuple -> typeCheckDotTuple(expr, typeToMatch, context)
     is ConstTrue -> typeCheckBool(typeToMatch)
     is ConstFalse -> typeCheckBool(typeToMatch)
     is ConstInt -> typeCheckInt(expr.integer_, typeToMatch)
+    is ConstUnit -> typeCheckUnit(typeToMatch)
     is Succ -> typeCheckSucc(expr, typeToMatch, context)
     is If -> typeCheckIf(expr, typeToMatch, context)
     is NatRec -> typeCheckNatRec(expr, typeToMatch, context)
@@ -135,6 +139,70 @@ fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, 
     return variableType
 }
 
+fun typeCheckTuple(tuple: Tuple, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    val typeOfTuple = constructTypeTuple(tuple.listexpr_, context)
+
+    if (typeToMatch == null) {
+        return typeOfTuple
+    }
+
+    when (typeToMatch) {
+        is TypeTuple -> {
+            if (typeOfTuple != typeToMatch) {
+            throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}" +
+                "Instead found type ${PrettyPrinter.print(typeOfTuple)}" +
+                    "In Expression ${PrettyPrinter.print(tuple)}")
+        }
+        else
+            return typeOfTuple
+        }
+
+        else -> throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}" +
+                "Instead found type Tuple")
+    }
+
+}
+
+fun typeCheckDotTuple(dotTuple: DotTuple, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    val exprType = typeCheckExpression(dotTuple.expr_, null, context)
+
+    when (exprType) {
+        is TypeTuple -> {
+
+            // Throw error if index is 0 or out of range
+            // Cast here because type has already been checked
+            val dotTupleIndex = dotTuple.integer_
+
+            if (dotTupleIndex == 0)
+                throw TypeError("Illegal access to index 0 in tuple ${PrettyPrinter.print(dotTuple.expr_)}")
+
+            val tupleSize = exprType.listtype_.size
+
+            if (dotTupleIndex > tupleSize) {
+                throw TypeError("Unexpected access to index $dotTupleIndex in a tuple ${PrettyPrinter.print(dotTuple.expr_)}\n" +
+                        "of size $tupleSize")
+            }
+
+            // Check that typeToMatch is the same type as the one accessed in the tuple
+            val typeAccessed = exprType.listtype_[dotTupleIndex - 1]
+
+            if (typeToMatch == null)
+                return typeAccessed
+
+            if (typeToMatch != typeAccessed) {
+                throw TypeError("Expected expression of type ${PrettyPrinter.print(typeToMatch)}\n" +
+                        "Instead found expression of type ${PrettyPrinter.print(typeAccessed)}\n" +
+                        "In ${PrettyPrinter.print(dotTuple)}")
+            }
+
+            return typeAccessed
+        }
+        // Throw error if trying to access non-tuple expression
+        else -> throw TypeError("Expected an expression of type Tuple\n" +
+                "Instead found and expression of type ${PrettyPrinter.print(exprType)}")
+    }
+
+}
 fun typeCheckBool(typeToMatch: Type?): Type? {
 
     if (typeToMatch == null)
@@ -142,9 +210,9 @@ fun typeCheckBool(typeToMatch: Type?): Type? {
 
     when (typeToMatch) {
         // Throw error is return type is not Bool
-        !is TypeBool -> throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
+        is TypeBool -> return TypeBool()
+        else -> throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
                 "Instead found argument of type Bool")
-        else -> return TypeBool()
     }
 }
 fun typeCheckInt(intVal: Int, typeToMatch: Type?): Type? {
@@ -156,6 +224,16 @@ fun typeCheckInt(intVal: Int, typeToMatch: Type?): Type? {
         throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n")
 
     return TypeNat()
+}
+
+fun typeCheckUnit(typeToMatch: Type?): Type? {
+    if (typeToMatch == null)
+        return TypeUnit()
+
+    if(typeToMatch !is TypeUnit)
+        throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n")
+
+    return TypeUnit()
 }
 
 fun typeCheckSucc(succExpr:Succ, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
@@ -283,4 +361,14 @@ fun constructTypeFun(argType: Type?, returnType: Type?): TypeFun {
     argListType.add(argType)
 
     return TypeFun(argListType, returnType)
+}
+
+fun constructTypeTuple(tupleExpressions: ListExpr, context: MutableMap<String, Type>): TypeTuple {
+    val exprListType = ListType()
+
+    for(expr in tupleExpressions) {
+        exprListType.add(typeCheckExpression(expr, null, context))
+    }
+
+    return TypeTuple(exprListType)
 }
