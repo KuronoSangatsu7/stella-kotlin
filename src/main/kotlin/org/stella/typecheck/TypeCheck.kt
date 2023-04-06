@@ -70,6 +70,9 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
     is ConstUnit -> typeCheckUnit(typeToMatch)
     is Succ -> typeCheckSucc(expr, typeToMatch, context)
     is If -> typeCheckIf(expr, typeToMatch, context)
+    is Match -> typeCheckMatch(expr, typeToMatch, context)
+    is Inl -> typeCheckInl(expr, typeToMatch, context)
+    is Inr -> typeCheckInr(expr, typeToMatch, context)
     is NatRec -> typeCheckNatRec(expr, typeToMatch, context)
     is IsZero -> typeCheckIsZero(expr, typeToMatch, context)
     is Abstraction -> typeCheckAbstraction(expr, typeToMatch, context)
@@ -134,7 +137,7 @@ fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, 
     if (variableType != typeToMatch)
         throw TypeError("Expected ${PrettyPrinter.print(variable)} " +
                 "to be of type ${PrettyPrinter.print(typeToMatch)}\n" +
-                "Instead assigned value of type ${PrettyPrinter.print(variableType)}.")
+                "Instead assigned value of type ${PrettyPrinter.print(variableType)}\n")
 
     return variableType
 }
@@ -202,6 +205,127 @@ fun typeCheckDotTuple(dotTuple: DotTuple, typeToMatch: Type?, context: MutableMa
                 "Instead found and expression of type ${PrettyPrinter.print(exprType)}")
     }
 
+}
+
+fun typeCheckMatch(match: Match, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    val exprType = typeCheckExpression(match.expr_, null, context)
+    // TODO: Handle null
+    when (exprType) {
+        is TypeSum -> {
+            val leftType = exprType.type_1
+            val rightType = exprType.type_2
+
+            val numExpr = match.listmatchcase_.size
+
+            // Throw error if 0 branches
+            if (numExpr == 0)
+                throw TypeError("Illegal empty matching in expression ${PrettyPrinter.print(match)}")
+
+            // Throw error if inl or inr are missing
+            if (!checkInrInl(match.listmatchcase_))
+                throw TypeError("Non-exhaustive pattern matches in expression ${PrettyPrinter.print(match)}")
+
+            // Typecheck branches
+            for (case in match.listmatchcase_) {
+                var patternVar: Var
+
+                when (case) {
+                    is AMatchCase -> {
+                        when (val pattern = case.pattern_) {
+                            is PatternInl -> {
+                                val caseContext = mapOf(PrettyPrinter.print(pattern.pattern_) to leftType)
+                                var innerContext = (context + caseContext) as MutableMap<String, Type>
+
+                                typeCheckExpression(case.expr_, typeToMatch, innerContext)
+                            }
+                            is PatternInr -> {
+                                val caseContext = mapOf(PrettyPrinter.print(pattern.pattern_) to rightType)
+                                var innerContext = (context + caseContext) as MutableMap<String, Type>
+
+                                typeCheckExpression(case.expr_, typeToMatch, innerContext)
+                            }
+                        }
+                    }
+                }
+            }
+
+        }
+        // TODO: Add other matchable types
+        else -> {
+            throw TypeError("Attempt to pattern match on non-viable type ${PrettyPrinter.print(exprType)}")
+        }
+    }
+
+    return TypeBool()
+}
+
+fun typeCheckInl(expr: Inl, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    if (typeToMatch == null) {
+        return TypeSum(typeCheckExpression(expr.expr_, null, context), null)
+    }
+
+    var innerExprType = typeCheckExpression(expr.expr_, null, context)
+
+    when (typeToMatch) {
+        is TypeSum -> {
+            if (typeToMatch.type_1 == null) {
+                return TypeSum(innerExprType, typeToMatch.type_2)
+            }
+
+            if (!compareNullSafe(innerExprType, typeToMatch.type_1))
+                throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch.type_1)}\n" +
+                        "in sum type ${PrettyPrinter.print(typeToMatch)}\n" +
+                        "Instead found type ${PrettyPrinter.print(innerExprType)}")
+
+            return typeToMatch
+        }
+
+        else -> throw TypeError("Expected sum type\n" +
+                "Instead found type ${PrettyPrinter.print(innerExprType)}")
+    }
+}
+
+fun typeCheckInr(expr: Inr, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    if (typeToMatch == null) {
+        return TypeSum(null, typeCheckExpression(expr.expr_, null, context))
+    }
+
+    var innerExprType = typeCheckExpression(expr.expr_, null, context)
+
+    when (typeToMatch) {
+        is TypeSum -> {
+            if (typeToMatch.type_2 == null) {
+                return TypeSum(typeToMatch.type_1, innerExprType)
+            }
+
+            if (!compareNullSafe(innerExprType, typeToMatch.type_2))
+                throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch.type_2)}\n" +
+                        "in sum type ${PrettyPrinter.print(typeToMatch)}\n" +
+                        "Instead found type ${PrettyPrinter.print(innerExprType)}")
+
+            return typeToMatch
+        }
+
+        else -> throw TypeError("Expected sum type\n" +
+                "Instead found type ${PrettyPrinter.print(innerExprType)}")
+    }
+}
+
+fun compareNullSafe (type1: Type?, type2: Type?): Boolean {
+    if (type1 is TypeSum && type2 is TypeSum) {
+        return (compareNullSafe(type1.type_1, type2.type_1) && compareNullSafe(type1.type_2, type2.type_2))
+    }
+
+    if (type1 is TypeSum)
+        return type2 == null
+
+    if (type2 is TypeSum)
+        return type1 == null
+
+    if (type1 == null || type2 == null)
+        return true
+
+    return type1 == type2
 }
 fun typeCheckBool(typeToMatch: Type?): Type? {
 
@@ -353,6 +477,24 @@ fun typeCheckFirstParam(firstParamType: Type?, typeToMatch: Type?) {
         throw TypeError("Type ${PrettyPrinter.print(firstParamType)}\n" +
                 "does not match declared type ${PrettyPrinter.print(typeToMatch)}")
     }
+}
+
+// Given ListMatchCase of a match expression verifies that the list contains
+// at least one Inr and at least one Inl cases
+fun checkInrInl(cases: ListMatchCase): Boolean {
+    var inl = false
+    var inr = false
+    for (expr in cases) {
+        when(expr) {
+            is AMatchCase ->
+                when (expr.pattern_) {
+                    is PatternInl -> inl = true
+                    is PatternInr -> inr = true
+                }
+        }
+    }
+
+    return inl && inr
 }
 
 // Constructs a TypeFun given the type of its argument and its return type
