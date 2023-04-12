@@ -243,6 +243,7 @@ fun typeCheckMatch(match: Match, typeToMatch: Type?, context: MutableMap<String,
                 throw TypeError("Non-exhaustive pattern matches in expression ${PrettyPrinter.print(match)}")
 
             // Typecheck branches
+            var branchTypes = mutableSetOf<Type?>()
             for (case in match.listmatchcase_) {
                 when (case) {
                     is AMatchCase -> {
@@ -251,11 +252,20 @@ fun typeCheckMatch(match: Match, typeToMatch: Type?, context: MutableMap<String,
                         val caseContext = mapOf(varTypeTuple.first to varTypeTuple.second)
                         var innerContext = (context + caseContext) as MutableMap<String, Type>
 
-                        typeCheckExpression(case.expr_, typeToMatch, innerContext)
+                        val branchType = typeCheckExpression(case.expr_, typeToMatch, innerContext)
 
+                        branchTypes.add(branchType)
                     }
                 }
             }
+
+            if(branchTypes.size > 1) {
+                   throw TypeError("Type ${PrettyPrinter.print(branchTypes.elementAt(1))} does not match" +
+                           "Type ${PrettyPrinter.print(branchTypes.elementAt(0))}")
+            }
+
+            else
+                return branchTypes.elementAt(0)
         }
 
     }
