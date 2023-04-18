@@ -2,8 +2,6 @@ package org.stella.typecheck
 
 import org.syntax.stella.Absyn.*
 import org.syntax.stella.PrettyPrinter
-import java.util.LinkedList
-import kotlin.reflect.typeOf
 
 class TypeError(message: String) : Exception(message)
 
@@ -51,6 +49,7 @@ fun typeCheckFunctionDeclaration(decl: DeclFun) {
     }
 
     val returnExpr = decl.expr_
+
     typeCheckExpression(returnExpr, returnType, context)
 }
 
@@ -71,7 +70,7 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
     is DotTuple -> typeCheckDotTuple(expr, typeToMatch, context)
     is ConstTrue -> typeCheckBool(typeToMatch)
     is ConstFalse -> typeCheckBool(typeToMatch)
-    is ConstInt -> typeCheckInt(expr.integer_, typeToMatch)
+    is ConstInt -> typeCheckInt(expr, typeToMatch)
     is ConstUnit -> typeCheckUnit(typeToMatch)
     is Succ -> typeCheckSucc(expr, typeToMatch, context)
     is If -> typeCheckIf(expr, typeToMatch, context)
@@ -91,6 +90,11 @@ fun typeCheckApplication(expr: Application, typeToMatch: Type?, context: Mutable
             val firstArgExpectedType = functionType.listtype_[0]
             val applicationReturnType = functionType.type_
             typeCheckExpression(expr.listexpr_[0], firstArgExpectedType, context)
+
+            if (applicationReturnType != typeToMatch && typeToMatch != null)
+                throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
+                        "Instead found ${PrettyPrinter.print(applicationReturnType)}\n" +
+                        "in expression ${PrettyPrinter.print(expr)}")
 
             return applicationReturnType
         }
@@ -389,12 +393,14 @@ fun typeCheckBool(typeToMatch: Type?): Type? {
     }
 }
 
-fun typeCheckInt(intVal: Int, typeToMatch: Type?): Type? {
+fun typeCheckInt(intVal: ConstInt, typeToMatch: Type?): Type? {
     if (typeToMatch == null)
         return TypeNat()
 
+    val int = intVal.integer_
+
     // Throw error if number is not 0 or return type is not Nat
-    if (intVal != 0 || typeToMatch !is TypeNat)
+    if (int != 0 || typeToMatch !is TypeNat)
         throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n")
 
     return TypeNat()
@@ -424,23 +430,11 @@ fun typeCheckSucc(succExpr: Succ, typeToMatch: Type?, context: MutableMap<String
 
     }
 
-    // Throw error if content is not one of
-    when (val succContent = succExpr.expr_) {
-        // Succ
-        is Succ -> typeCheckSucc(succContent, typeToMatch, context)
-        // 0
-        is ConstInt -> typeCheckInt(succContent.integer_, typeToMatch)
-        // a variable of type Nat
-        is Var -> typeCheckVar(succContent, typeToMatch, context)
+    val succContent = succExpr.expr_
 
-        else -> throw TypeError(
-            "An argument of Succ must be of type Nat,\n" +
-                    "but provided argument ${PrettyPrinter.print(succContent)}\n" +
-                    "of type ${PrettyPrinter.print(typeCheckExpression(succContent, null, context))}"
-        )
-    }
+    val succContentType = typeCheckExpression(succContent, TypeNat(), context)
 
-    return TypeNat()
+    return succContentType
 }
 
 fun typeCheckIsZero(isZeroExpr: IsZero, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
@@ -456,23 +450,11 @@ fun typeCheckIsZero(isZeroExpr: IsZero, typeToMatch: Type?, context: MutableMap<
         )
     }
 
-    // Throw error if content is not one of
-    when (val isZeroContent = isZeroExpr.expr_) {
-        // Succ
-        is Succ -> typeCheckSucc(isZeroContent, TypeNat(), context)
-        //0
-        is ConstInt -> typeCheckInt(isZeroContent.integer_, TypeNat())
-        // a variable of type Nat
-        is Var -> typeCheckVar(isZeroContent, TypeNat(), context)
+    val isZeroContent = isZeroExpr.expr_
 
-        else -> throw TypeError(
-            "An argument of IsZero must be of type Nat,\n" +
-                    "but provided argument ${PrettyPrinter.print(isZeroContent)}\n" +
-                    "of type ${PrettyPrinter.print(typeCheckExpression(isZeroExpr, null, context))}"
-        )
-    }
+    val isZeroContentType = typeCheckExpression(isZeroContent, TypeNat(), context)
 
-    return TypeBool()
+    return isZeroContentType
 }
 
 fun typeCheckIf(ifExpr: If, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
