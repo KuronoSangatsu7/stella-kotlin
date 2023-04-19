@@ -45,8 +45,8 @@ internal class MainTest {
 
     companion object {
         private const val BASE_DIR = "src/test/resources"
-        private const val WELL_TYPED_DIR = "$BASE_DIR/well-typed"
-        private const val ILL_TYPED_DIR = "$BASE_DIR/ill-typed"
+        private const val WELL_TYPED_DIR = "well-typed"
+        private const val ILL_TYPED_DIR = "ill-typed"
 
         @JvmStatic
         fun wellTypedPathStream(): Stream<Path> = getFilesStream(WELL_TYPED_DIR)
@@ -54,6 +54,20 @@ internal class MainTest {
         @JvmStatic
         fun illTypedPathStream(): Stream<Path> = getFilesStream(ILL_TYPED_DIR)
 
-        private fun getFilesStream(path: String) = Files.list(Paths.get(path))
+        private fun getFilesStream(dirName: String): Stream<Path> {
+            val dirPaths = Files.walk(Paths.get(BASE_DIR))
+                .filter { it.toAbsolutePath().toString().endsWith(dirName) }
+                .filter { Files.isDirectory(it) }
+                .map { it.toAbsolutePath() }
+                .toList()
+            val filePaths = mutableListOf<Path>()
+            dirPaths.forEach { dirPath ->
+                Files.walk(dirPath)
+                    .filter { it.toAbsolutePath().toString().endsWith(".stella") }
+                    .filter { Files.isRegularFile(it) }
+                    .forEach { filePaths.add(it.toAbsolutePath()) }
+            }
+            return filePaths.stream()
+        }
     }
 }
