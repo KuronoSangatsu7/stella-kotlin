@@ -81,7 +81,28 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
     is IsZero -> typeCheckIsZero(expr, typeToMatch, context)
     is Abstraction -> typeCheckAbstraction(expr, typeToMatch, context)
     is Application -> typeCheckApplication(expr, typeToMatch, context)
+    is Sequence -> typeCheckSequence(expr, typeToMatch, context)
     else -> null
+}
+
+fun typeCheckSequence(expr: Sequence, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    //TODO: make sure you dont need to check the one-branch case, most likely not
+
+    // Throw error if first branch is not TypeUnit
+    typeCheckExpression(expr.expr_1, TypeUnit(), context)
+
+    // Check second branch type against typeToMatch or return it if typeToMatch is null
+    val secondBranchReturnType = typeCheckExpression(expr.expr_2, typeToMatch, context)
+
+    if (typeToMatch == null)
+        return secondBranchReturnType
+
+    if (typeToMatch != secondBranchReturnType)
+        throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
+                "Instead found type ${PrettyPrinter.print(secondBranchReturnType)}\n" +
+                "In expression ${PrettyPrinter.print(expr.expr_2)}")
+
+    return secondBranchReturnType
 }
 
 fun typeCheckApplication(expr: Application, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
@@ -91,7 +112,10 @@ fun typeCheckApplication(expr: Application, typeToMatch: Type?, context: Mutable
             val applicationReturnType = functionType.type_
             typeCheckExpression(expr.listexpr_[0], firstArgExpectedType, context)
 
-            if (applicationReturnType != typeToMatch && typeToMatch != null)
+            if (typeToMatch == null)
+                return applicationReturnType
+
+            if (applicationReturnType != typeToMatch)
                 throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
                         "Instead found ${PrettyPrinter.print(applicationReturnType)}\n" +
                         "in expression ${PrettyPrinter.print(expr)}")
