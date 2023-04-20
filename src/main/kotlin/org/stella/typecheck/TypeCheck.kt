@@ -85,7 +85,85 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
     is Application -> typeCheckApplication(expr, typeToMatch, context)
     is Sequence -> typeCheckSequence(expr, typeToMatch, context)
     is Panic -> typeCheckPanic(expr, typeToMatch, context)
+    is Ref -> typeCheckRef(expr, typeToMatch, context)
+    is Deref -> typeCheckDeref(expr, typeToMatch, context)
+    is Assign -> typeCheckAssign(expr, typeToMatch, context)
     else -> null
+}
+
+fun typeCheckAssign(expr: Assign, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+
+    val leftExpressionType = typeCheckExpression(expr.expr_1, null, context)
+    val rightExpressionType = typeCheckExpression(expr.expr_2, null, context)
+
+    when (leftExpressionType) {
+        is TypeRef -> {
+            if (leftExpressionType.type_ != rightExpressionType)
+                throw TypeError(
+                    "Expected type ${PrettyPrinter.print(leftExpressionType.type_)}\n" +
+                            "Instead found ${PrettyPrinter.print(rightExpressionType)}\n" +
+                            "In expression ${PrettyPrinter.print(expr)}"
+                )
+
+            if (typeToMatch == null)
+                return TypeUnit()
+
+            if (typeToMatch !is TypeUnit)
+                throw TypeError(
+                    "Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
+                            "Instead found ${PrettyPrinter.print(TypeUnit())}\n" +
+                            "In expression ${PrettyPrinter.print(expr)}"
+                )
+
+            return TypeUnit()
+        }
+
+        else -> throw TypeError("Cannot assign a value to a non-reference ${PrettyPrinter.print(expr.expr_1)}")
+    }
+}
+
+fun typeCheckDeref(expr: Deref, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    val innerExprType = typeCheckExpression(expr.expr_, null, context)
+
+    when (innerExprType) {
+        is TypeRef -> {
+            val dereferencedType = innerExprType.type_
+
+            if (typeToMatch == null)
+                return dereferencedType
+
+            if (dereferencedType != typeToMatch)
+                throw TypeError(
+                    "Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
+                            "Instead found type ${PrettyPrinter.print(innerExprType)}\n" +
+                            "In expression ${PrettyPrinter.print(expr)}"
+                )
+
+            return dereferencedType
+        }
+
+        else -> throw TypeError(
+            "Cannot dereference an expression ${PrettyPrinter.print(expr.expr_)}\n" +
+                    "of a non-reference type ${PrettyPrinter.print(innerExprType)}"
+        )
+    }
+}
+
+fun typeCheckRef(expr: Ref, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    val innerExprType = typeCheckExpression(expr.expr_, null, context)
+    val refType = TypeRef(innerExprType)
+
+    if (typeToMatch == null)
+        return refType
+
+    if (refType != typeToMatch)
+        throw TypeError(
+            "Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
+                    "Instead found type ${PrettyPrinter.print(refType)}\n" +
+                    "In expression ${PrettyPrinter.print(expr)}"
+        )
+
+    return refType
 }
 
 fun typeCheckPanic(expr: Panic, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
@@ -108,9 +186,11 @@ fun typeCheckSequence(expr: Sequence, typeToMatch: Type?, context: MutableMap<St
         return secondBranchReturnType
 
     if (typeToMatch != secondBranchReturnType)
-        throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
-                "Instead found type ${PrettyPrinter.print(secondBranchReturnType)}\n" +
-                "In expression ${PrettyPrinter.print(expr.expr_2)}")
+        throw TypeError(
+            "Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
+                    "Instead found type ${PrettyPrinter.print(secondBranchReturnType)}\n" +
+                    "In expression ${PrettyPrinter.print(expr.expr_2)}"
+        )
 
     return secondBranchReturnType
 }
@@ -126,9 +206,11 @@ fun typeCheckApplication(expr: Application, typeToMatch: Type?, context: Mutable
                 return applicationReturnType
 
             if (applicationReturnType != typeToMatch)
-                throw TypeError("Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
-                        "Instead found ${PrettyPrinter.print(applicationReturnType)}\n" +
-                        "in expression ${PrettyPrinter.print(expr)}")
+                throw TypeError(
+                    "Expected type ${PrettyPrinter.print(typeToMatch)}\n" +
+                            "Instead found ${PrettyPrinter.print(applicationReturnType)}\n" +
+                            "in expression ${PrettyPrinter.print(expr)}"
+                )
 
             return applicationReturnType
         }
@@ -216,6 +298,7 @@ fun typeCheckRecord(record: Record, typeToMatch: Type?, context: MutableMap<Stri
         )
     }
 }
+
 fun typeCheckTuple(tuple: Tuple, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
     val typeOfTuple = constructTypeTuple(tuple.listexpr_, context)
 
@@ -353,12 +436,12 @@ fun typeCheckMatch(match: Match, typeToMatch: Type?, context: MutableMap<String,
                 }
             }
 
-            if(branchTypes.size > 1) {
-                   throw TypeError("Type ${PrettyPrinter.print(branchTypes.elementAt(1))} does not match" +
-                           "Type ${PrettyPrinter.print(branchTypes.elementAt(0))}")
-            }
-
-            else
+            if (branchTypes.size > 1) {
+                throw TypeError(
+                    "Type ${PrettyPrinter.print(branchTypes.elementAt(1))} does not match" +
+                            "Type ${PrettyPrinter.print(branchTypes.elementAt(0))}"
+                )
+            } else
                 return branchTypes.elementAt(0)
         }
 
@@ -640,15 +723,17 @@ fun accessRecord(dotRecord: DotRecord, fieldAccessed: String, recordType: TypeRe
     val recordListRecordFieldType = recordType.listrecordfieldtype_
 
     for (recordFieldType in recordListRecordFieldType)
-        when(recordFieldType) {
+        when (recordFieldType) {
             is ARecordFieldType ->
                 if (recordFieldType.stellaident_ == fieldAccessed)
                     return recordFieldType.type_
         }
 
-    throw TypeError("Unexpected access to field $fieldAccessed\n" +
-            "In a record of type ${PrettyPrinter.print(recordType)}\n" +
-            "In the expression ${PrettyPrinter.print(dotRecord)}")
+    throw TypeError(
+        "Unexpected access to field $fieldAccessed\n" +
+                "In a record of type ${PrettyPrinter.print(recordType)}\n" +
+                "In the expression ${PrettyPrinter.print(dotRecord)}"
+    )
 }
 
 // Constructs a TypeFun given the type of its argument and its return type
@@ -678,7 +763,12 @@ fun constructTypeRecord(recordListBinding: ListBinding, context: MutableMap<Stri
         when (binding) {
             is ABinding -> {
                 // Add name of the field and its type to the list of record field types
-                recordListRecordFieldType.add(ARecordFieldType(binding.stellaident_, typeCheckExpression(binding.expr_, null, context)))
+                recordListRecordFieldType.add(
+                    ARecordFieldType(
+                        binding.stellaident_,
+                        typeCheckExpression(binding.expr_, null, context)
+                    )
+                )
             }
         }
     }
