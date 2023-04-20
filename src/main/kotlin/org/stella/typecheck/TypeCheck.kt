@@ -82,7 +82,15 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
     is Abstraction -> typeCheckAbstraction(expr, typeToMatch, context)
     is Application -> typeCheckApplication(expr, typeToMatch, context)
     is Sequence -> typeCheckSequence(expr, typeToMatch, context)
+    is Panic -> typeCheckPanic(expr, typeToMatch, context)
     else -> null
+}
+
+fun typeCheckPanic(expr: Panic, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    if (typeToMatch == null)
+        throw TypeError("Illegal expression ${PrettyPrinter.print(expr)}")
+
+    return typeToMatch
 }
 
 fun typeCheckSequence(expr: Sequence, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
