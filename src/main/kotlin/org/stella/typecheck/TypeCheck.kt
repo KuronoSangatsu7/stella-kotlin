@@ -68,6 +68,8 @@ fun typeCheckExpression(expr: Expr, typeToMatch: Type?, context: MutableMap<Stri
     is Var -> typeCheckVar(expr, typeToMatch, context)
     is Tuple -> typeCheckTuple(expr, typeToMatch, context)
     is DotTuple -> typeCheckDotTuple(expr, typeToMatch, context)
+    is Record -> typeCheckRecord(expr, typeToMatch, context)
+    is DotRecord -> typeCheckDotRecord(expr, typeToMatch, context)
     is ConstTrue -> typeCheckBool(typeToMatch)
     is ConstFalse -> typeCheckBool(typeToMatch)
     is ConstInt -> typeCheckInt(expr, typeToMatch)
@@ -189,12 +191,36 @@ fun typeCheckVar(variable: Var, typeToMatch: Type?, context: MutableMap<String, 
     return variableType
 }
 
+fun typeCheckRecord(record: Record, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    val typeOfRecord = constructTypeRecord(record.listbinding_, context)
+
+    if (typeToMatch == null)
+        return typeOfRecord
+
+    when (typeToMatch) {
+        is TypeRecord -> {
+            // TODO: implement record subtyping here
+            if (typeOfRecord != typeToMatch) {
+                throw TypeError(
+                    "Expected type ${PrettyPrinter.print(typeToMatch)}" +
+                            "Instead found type ${PrettyPrinter.print(typeOfRecord)}" +
+                            "In Expression ${PrettyPrinter.print(record)}"
+                )
+            } else
+                return typeOfRecord
+        }
+
+        else -> throw TypeError(
+            "Expected type ${PrettyPrinter.print(typeToMatch)}" +
+                    "Instead found type Record"
+        )
+    }
+}
 fun typeCheckTuple(tuple: Tuple, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
     val typeOfTuple = constructTypeTuple(tuple.listexpr_, context)
 
-    if (typeToMatch == null) {
+    if (typeToMatch == null)
         return typeOfTuple
-    }
 
     when (typeToMatch) {
         is TypeTuple -> {
@@ -214,6 +240,38 @@ fun typeCheckTuple(tuple: Tuple, typeToMatch: Type?, context: MutableMap<String,
         )
     }
 
+}
+
+fun typeCheckDotRecord(dotRecord: DotRecord, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
+    val exprType = typeCheckExpression(dotRecord.expr_, null, context)
+
+    when (exprType) {
+        is TypeRecord -> {
+
+            val dotRecordFieldAccessed = dotRecord.stellaident_
+
+            // Check that typeToMatch is the same type as the one accessed in the record
+            val typeAccessed = accessRecord(dotRecord, dotRecordFieldAccessed, exprType)
+
+            if (typeToMatch == null)
+                return typeAccessed
+
+            if (typeToMatch != typeAccessed) {
+                throw TypeError(
+                    "Expected expression of type ${PrettyPrinter.print(typeToMatch)}\n" +
+                            "Instead found expression of type ${PrettyPrinter.print(typeAccessed)}\n" +
+                            "In ${PrettyPrinter.print(dotRecord)}"
+                )
+            }
+
+            return typeAccessed
+        }
+        // Throw error if trying to access non-record expression
+        else -> throw TypeError(
+            "Expected an expression of type Record\n" +
+                    "Instead found and expression of type ${PrettyPrinter.print(exprType)}"
+        )
+    }
 }
 
 fun typeCheckDotTuple(dotTuple: DotTuple, typeToMatch: Type?, context: MutableMap<String, Type>): Type? {
@@ -575,6 +633,24 @@ fun checkInrInl(cases: ListMatchCase): Boolean {
     return inl && inr
 }
 
+// Given a DotRecord, the field accessed and its ListRecordFieldType
+// Determines whether the access is legal, and returns the type of the accessed field
+fun accessRecord(dotRecord: DotRecord, fieldAccessed: String, recordType: TypeRecord): Type? {
+
+    val recordListRecordFieldType = recordType.listrecordfieldtype_
+
+    for (recordFieldType in recordListRecordFieldType)
+        when(recordFieldType) {
+            is ARecordFieldType ->
+                if (recordFieldType.stellaident_ == fieldAccessed)
+                    return recordFieldType.type_
+        }
+
+    throw TypeError("Unexpected access to field $fieldAccessed\n" +
+            "In a record of type ${PrettyPrinter.print(recordType)}\n" +
+            "In the expression ${PrettyPrinter.print(dotRecord)}")
+}
+
 // Constructs a TypeFun given the type of its argument and its return type
 fun constructTypeFun(argType: Type?, returnType: Type?): TypeFun {
     val argListType = ListType()
@@ -592,4 +668,20 @@ fun constructTypeTuple(tupleExpressions: ListExpr, context: MutableMap<String, T
     }
 
     return TypeTuple(exprListType)
+}
+
+// Constructs a TypeRecord given its list of bindings and the current context
+fun constructTypeRecord(recordListBinding: ListBinding, context: MutableMap<String, Type>): TypeRecord {
+    val recordListRecordFieldType = ListRecordFieldType()
+
+    for (binding in recordListBinding) {
+        when (binding) {
+            is ABinding -> {
+                // Add name of the field and its type to the list of record field types
+                recordListRecordFieldType.add(ARecordFieldType(binding.stellaident_, typeCheckExpression(binding.expr_, null, context)))
+            }
+        }
+    }
+
+    return TypeRecord(recordListRecordFieldType)
 }
