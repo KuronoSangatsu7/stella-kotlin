@@ -2,6 +2,7 @@ package org.stella.typecheck
 
 import org.syntax.stella.Absyn.*
 import org.syntax.stella.PrettyPrinter
+import kotlin.math.exp
 
 class TypeError(message: String) : Exception(message)
 
@@ -90,6 +91,16 @@ fun typeCheckExpression(expr: Expr, expectedType: Type?, context: MutableMap<Str
     is Assign -> typeCheckAssign(expr, expectedType, context)
     is Let -> typeCheckLetBinding(expr, expectedType, context)
     is TypeCast -> typeCheckTypeCast(expr, expectedType, context)
+    is Add -> typeCheckAdd(expr, expectedType, context)
+    is Subtract -> typeCheckSubtract(expr, expectedType, context)
+    is Multiply -> typeCheckMultiply(expr, expectedType, context)
+    is Divide -> typeCheckDivide(expr, expectedType, context)
+    is LessThan -> typeCheckLessThan(expr, expectedType, context)
+    is LessThanOrEqual -> typeCheckLessThanOrEqual(expr, expectedType, context)
+    is GreaterThan -> typeCheckGreaterThan(expr, expectedType, context)
+    is GreaterThanOrEqual -> typeCheckGreaterThanOrEqual(expr, expectedType, context)
+    is Equal -> typeCheckEqual(expr, expectedType, context)
+    is NotEqual -> typeCheckNotEqual(expr, expectedType, context)
     else -> null
 }
 
@@ -184,6 +195,85 @@ fun isHomogenousListType(listTypes: MutableList<Type?>): Type? {
                 return null
 
     return mostGeneralType
+}
+
+// Performs typechcking for operators, both arithmetic and comparison
+fun typeCheckNatOperators(
+    operatorType: String,
+    leftExpr: Expr,
+    rightExpr: Expr,
+    expectedType: Type?,
+    context: MutableMap<String, Type>
+): Type? {
+    typeCheckExpression(leftExpr, TypeNat(), context)
+    typeCheckExpression(rightExpr, TypeNat(), context)
+
+    if (expectedType == null)
+        return if (operatorType == "comp")
+            TypeBool()
+        else
+            TypeNat()
+    if (operatorType == "comp") {
+        if (expectedType !is TypeBool)
+            throw TypeError(
+                "Expected type ${PrettyPrinter.print(expectedType)}\n" +
+                        "Instead found type ${PrettyPrinter.print(TypeBool())}"
+            )
+    } else
+        if (expectedType !is TypeNat)
+            throw TypeError(
+                "Expected type ${PrettyPrinter.print(expectedType)}\n" +
+                        "Instead found type ${PrettyPrinter.print(TypeNat())}"
+            )
+
+    return if (operatorType == "comp")
+        TypeBool()
+    else
+        TypeNat()
+}
+
+fun typeCheckNotEqual(compExpr: NotEqual, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
+}
+
+fun typeCheckEqual(compExpr: Equal, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
+}
+
+fun typeCheckGreaterThanOrEqual(
+    compExpr: GreaterThanOrEqual,
+    expectedType: Type?,
+    context: MutableMap<String, Type>
+): Type? {
+    return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
+}
+
+fun typeCheckGreaterThan(compExpr: GreaterThan, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
+}
+
+fun typeCheckLessThanOrEqual(compExpr: LessThanOrEqual, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
+}
+
+fun typeCheckLessThan(compExpr: LessThan, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
+}
+
+fun typeCheckDivide(divideExpr: Divide, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    return typeCheckNatOperators("div", divideExpr.expr_1, divideExpr.expr_2, expectedType, context)
+}
+
+fun typeCheckMultiply(mutiplyExpr: Multiply, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    return typeCheckNatOperators("mul", mutiplyExpr.expr_1, mutiplyExpr.expr_2, expectedType, context)
+}
+
+fun typeCheckSubtract(subtractExpr: Subtract, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    return typeCheckNatOperators("sub", subtractExpr.expr_1, subtractExpr.expr_2, expectedType, context)
+}
+
+fun typeCheckAdd(addExpr: Add, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    return typeCheckNatOperators("add", addExpr.expr_1, addExpr.expr_2, expectedType, context)
 }
 
 fun typeCheckTypeCast(castExpr: TypeCast, expectedType: Type?, context: MutableMap<String, Type>): Type? {
@@ -684,7 +774,7 @@ fun typeCheckInt(intVal: ConstInt, expectedType: Type?): Type? {
     val int = intVal.integer_
 
     // Throw error if number is not 0 or return type is not Nat
-    if (int != 0 || expectedType !is TypeNat)
+    if (expectedType !is TypeNat)
         throw TypeError(
             "Expected type ${PrettyPrinter.print(expectedType)}\n" +
                     "Instead found type ${PrettyPrinter.print(TypeNat())}"
