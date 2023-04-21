@@ -88,10 +88,19 @@ fun typeCheckExpression(expr: Expr, expectedType: Type?, context: MutableMap<Str
     is Ref -> typeCheckRef(expr, expectedType, context)
     is Deref -> typeCheckDeref(expr, expectedType, context)
     is Assign -> typeCheckAssign(expr, expectedType, context)
+    is Let -> typeCheckLetBinding(expr, expectedType, context)
+    is TypeCast -> typeCheckTypeCast(expr, expectedType, context)
     else -> null
 }
 
 fun compareWithSubtyping(subType: Type?, superType: Type?): Boolean {
+    // TODO: implement type casting to use TypeTop
+    if (superType is TypeTop)
+        return true
+
+    if (subType is TypeBottom)
+        return true
+
     // guaranteed no null types will reach this point, they will be handled prior to being compared
     if (subType!!::class != superType!!::class)
         return false
@@ -175,6 +184,39 @@ fun isHomogenousListType(listTypes: MutableList<Type?>): Type? {
                 return null
 
     return mostGeneralType
+}
+
+fun typeCheckTypeCast(castExpr: TypeCast, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+    val exprType = typeCheckExpression(castExpr.expr_, null, context)
+
+    //TODO: Do we allow casting no matter what (no hierarchy)?
+
+    if (expectedType == null)
+        return castExpr.type_
+
+    if (!compareWithSubtyping(castExpr.type_, expectedType))
+        throw TypeError(
+            "Expected type ${PrettyPrinter.print(expectedType)}\n" +
+                    "Instead found type ${PrettyPrinter.print(castExpr.type_)}"
+        )
+
+    return castExpr.type_
+
+}
+
+fun typeCheckLetBinding(letExpr: Let, expectedType: Type?, outerContext: MutableMap<String, Type>): Type? {
+    var innerContext = mutableMapOf<String, Type>()
+
+    // Creating local scope
+    innerContext += parseListPatternBinding(letExpr.listpatternbinding_, outerContext)
+
+    // Adding previous scope to new scope
+    // Shadowing occurs naturally here as in the old values get overwritten
+    innerContext = (outerContext + innerContext) as MutableMap<String, Type>
+
+    val innerExprType = typeCheckExpression(letExpr.expr_, expectedType, innerContext)
+
+    return innerExprType
 }
 
 fun typeCheckAssign(expr: Assign, expectedType: Type?, context: MutableMap<String, Type>): Type? {
@@ -630,7 +672,7 @@ fun typeCheckBool(expectedType: Type?): Type? {
         is TypeBool -> return TypeBool()
         else -> throw TypeError(
             "Expected type ${PrettyPrinter.print(expectedType)}\n" +
-                    "Instead found argument of type Bool"
+                    "Instead found type ${PrettyPrinter.print(TypeBool())}"
         )
     }
 }
@@ -643,7 +685,10 @@ fun typeCheckInt(intVal: ConstInt, expectedType: Type?): Type? {
 
     // Throw error if number is not 0 or return type is not Nat
     if (int != 0 || expectedType !is TypeNat)
-        throw TypeError("Expected type ${PrettyPrinter.print(expectedType)}\n")
+        throw TypeError(
+            "Expected type ${PrettyPrinter.print(expectedType)}\n" +
+                    "Instead found type ${PrettyPrinter.print(TypeNat())}"
+        )
 
     return TypeNat()
 }
@@ -812,6 +857,27 @@ fun accessRecord(dotRecord: DotRecord, fieldAccessed: String, recordType: TypeRe
                 "In a record of type ${PrettyPrinter.print(recordType)}\n" +
                 "In the expression ${PrettyPrinter.print(dotRecord)}"
     )
+}
+
+// Given a
+fun parseListPatternBinding(
+    listPatternBinding: ListPatternBinding,
+    context: MutableMap<String, Type>
+): MutableMap<String, Type> {
+    var mapPatternBinding = mutableMapOf<String, Type>()
+
+    for (patternBinding in listPatternBinding)
+        when (patternBinding) {
+            is APatternBinding -> {
+                var pattern = patternBinding.pattern_
+                when (pattern) {
+                    is PatternVar -> mapPatternBinding[pattern.stellaident_] =
+                        typeCheckExpression(patternBinding.expr_, null, context)!!
+                }
+            }
+        }
+
+    return mapPatternBinding
 }
 
 // Constructs a TypeFun given the type of its argument and its return type
