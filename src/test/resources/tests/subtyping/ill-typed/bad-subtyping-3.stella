@@ -12,8 +12,8 @@ fn g(k : fn({y : Nat, x : Nat}) -> Nat) -> Nat {
   return k({x = 0, y = 0})
 }
 
-fn h(k : fn(fn({x : Nat}) -> Nat) -> Nat) -> Nat {
-  return k( fn(r : {x : Nat}) { return r.x } )
+fn h(k : fn(fn({z : Nat}) -> Nat) -> Nat) -> Nat {
+  return k( fn(r : {z : Nat}) { return r.z } )
 }
 
 fn main(n : Nat) -> Nat {
