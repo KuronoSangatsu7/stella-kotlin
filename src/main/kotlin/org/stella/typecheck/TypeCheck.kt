@@ -2,11 +2,55 @@ package org.stella.typecheck
 
 import org.syntax.stella.Absyn.*
 import org.syntax.stella.PrettyPrinter
-import kotlin.math.exp
 
 class TypeError(message: String) : Exception(message)
 
 var globalContext = mutableMapOf<String, Type>();
+
+class Context {
+    private var variables: MutableMap<String, Type> = mutableMapOf()
+    private var genericTypes: MutableList<String> = mutableListOf()
+
+    constructor()
+
+    constructor(initialVariables: Map<String, Type>) {
+        this.variables += initialVariables
+    }
+
+    constructor(initialTypes: List<String>) {
+        this.genericTypes.addAll(initialTypes)
+    }
+
+    constructor(initialVariables: Map<String, Type>, initialTypes: List<String>) {
+        this.variables += initialVariables
+        this.genericTypes.addAll(initialTypes)
+    }
+
+    constructor(oldContext: Context) {
+        this.variables = oldContext.variables
+        this.genericTypes = oldContext.genericTypes
+    }
+
+    fun appendVariables(newVariables: Map<String, Type>) {
+        this.variables += newVariables
+    }
+    
+    fun appendTypes(newTypes: List<String>) {
+        this.genericTypes.addAll(newTypes)
+    }
+
+    fun getVariableType(varIdent: String): Type? {
+        return this.variables[varIdent]
+    }
+    
+    fun hasType(typeIdent: String): Boolean {
+        return (typeIdent in this.genericTypes)
+    }
+
+    fun hasVariable(varIdent: String): Boolean {
+        return (varIdent in this.variables.keys)
+    }
+}
 
 object TypeCheck {
     fun typeCheckProgram(program: Program?) {
@@ -14,9 +58,8 @@ object TypeCheck {
             is AProgram ->
                 for (decl in program.listdecl_) {
                     when (decl) {
-                        is DeclFun -> {
-                            typeCheckFunctionDeclaration(decl)
-                        }
+                        is DeclFun -> typeCheckFunctionDeclaration(decl)
+                        is DeclFunGeneric -> typeCheckGenericFunctionDeclaration(decl)
                     }
                 }
         }
@@ -26,19 +69,47 @@ object TypeCheck {
 // Typechecks the contents of a function declaration against it's declared types
 // after adding it to the global scope
 fun typeCheckFunctionDeclaration(decl: DeclFun) {
-    val context = mutableMapOf<String, Type>()
+    typeCheckFunction(decl.returntype_, decl.listparamdecl_, decl.stellaident_, decl.expr_, Context())
+}
 
-    var returnType = when (decl.returntype_) {
+fun typeCheckGenericFunctionDeclaration(decl: DeclFunGeneric) {
+    //TODO: implement dis
+    // return type decl.returntype_
+    // return expr decl.expr_
+    // params decl.listparamdecl_
+    // list of generic types to be defined inside decl.liststellaident_
+
+
+    var genericTypeContext = mutableListOf<String>()
+    // add generic types to context
+    for (ident in decl.liststellaident_)
+        genericTypeContext.add(ident)
+    
+    var context = Context(genericTypeContext)
+    
+    typeCheckFunction(decl.returntype_, decl.listparamdecl_, decl.stellaident_, decl.expr_, context)
+}
+
+fun typeCheckFunction(
+    returnType: ReturnType,
+    params: ListParamDecl,
+    funcIdent: String,
+    returnExpr: Expr,
+    context: Context
+) {
+    val variableContext = mutableMapOf<String, Type>()
+
+    var returnType = when (returnType) {
         is SomeReturnType -> {
-            decl.returntype_.type_
+            returnType.type_
         }
 
         else -> throw TypeError("A function declaration must specify its return type.")
     }
 
-    for (paramDecl in decl.listparamdecl_) {
-        var params = parseParamDecl(paramDecl)
-        context += params
+    for (paramDecl in params) {
+        var params = parseParamDecl(paramDecl, context)
+        variableContext += params
 
         var paramType: Type? = null
         for (value in params.values)
@@ -46,17 +117,28 @@ fun typeCheckFunctionDeclaration(decl: DeclFun) {
 
         // Add function signature to global context
         var functionType = constructTypeFun(paramType, returnType)
-        globalContext[decl.stellaident_] = functionType
+        globalContext[funcIdent] = functionType
     }
-
-    val returnExpr = decl.expr_
-
+    
+    context.appendVariables(variableContext)
+    
     typeCheckExpression(returnExpr, returnType, context)
 }
 
 // Writes the given parameter declarations into a map to act as the function's local scope later on
-fun parseParamDecl(paramDecl: ParamDecl): Map<String, Type> = when (paramDecl) {
-    is AParamDecl -> mapOf(paramDecl.stellaident_ to paramDecl.type_)
+fun parseParamDecl(paramDecl: ParamDecl, context: Context): Map<String, Type> = when (paramDecl) {
+    is AParamDecl -> {
+        when (val type = paramDecl.type_) {
+            is TypeVar -> {
+                if (context.hasType(type.stellaident_)) {
+                    mapOf(paramDecl.stellaident_ to paramDecl.type_)
+                } else throw TypeError("unknown type alias ${type.stellaident_}")
+            }
+
+            else -> mapOf(paramDecl.stellaident_ to paramDecl.type_)
+        }
+    }
+
     else -> mapOf()
 }
 
@@ -65,7 +147,7 @@ fun parseParamDecl(paramDecl: ParamDecl): Map<String, Type> = when (paramDecl) {
 // When given null as expectedType
 // it simply returns the inferred type of the expression (assuming no TypeErrors happen further down the line)
 // The same thing goes for all the typeCheck functions
-fun typeCheckExpression(expr: Expr, expectedType: Type?, context: MutableMap<String, Type>): Type? = when (expr) {
+fun typeCheckExpression(expr: Expr, expectedType: Type?, context: Context): Type? = when (expr) {
     is Var -> typeCheckVar(expr, expectedType, context)
     is Tuple -> typeCheckTuple(expr, expectedType, context)
     is DotTuple -> typeCheckDotTuple(expr, expectedType, context)
@@ -203,7 +285,7 @@ fun typeCheckNatOperators(
     leftExpr: Expr,
     rightExpr: Expr,
     expectedType: Type?,
-    context: MutableMap<String, Type>
+    context: Context
 ): Type? {
     typeCheckExpression(leftExpr, TypeNat(), context)
     typeCheckExpression(rightExpr, TypeNat(), context)
@@ -232,51 +314,51 @@ fun typeCheckNatOperators(
         TypeNat()
 }
 
-fun typeCheckNotEqual(compExpr: NotEqual, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckNotEqual(compExpr: NotEqual, expectedType: Type?, context: Context): Type? {
     return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
 }
 
-fun typeCheckEqual(compExpr: Equal, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckEqual(compExpr: Equal, expectedType: Type?, context: Context): Type? {
     return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
 }
 
 fun typeCheckGreaterThanOrEqual(
     compExpr: GreaterThanOrEqual,
     expectedType: Type?,
-    context: MutableMap<String, Type>
+    context: Context
 ): Type? {
     return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
 }
 
-fun typeCheckGreaterThan(compExpr: GreaterThan, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckGreaterThan(compExpr: GreaterThan, expectedType: Type?, context: Context): Type? {
     return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
 }
 
-fun typeCheckLessThanOrEqual(compExpr: LessThanOrEqual, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckLessThanOrEqual(compExpr: LessThanOrEqual, expectedType: Type?, context: Context): Type? {
     return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
 }
 
-fun typeCheckLessThan(compExpr: LessThan, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckLessThan(compExpr: LessThan, expectedType: Type?, context: Context): Type? {
     return typeCheckNatOperators("comp", compExpr.expr_1, compExpr.expr_2, expectedType, context)
 }
 
-fun typeCheckDivide(divideExpr: Divide, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckDivide(divideExpr: Divide, expectedType: Type?, context: Context): Type? {
     return typeCheckNatOperators("div", divideExpr.expr_1, divideExpr.expr_2, expectedType, context)
 }
 
-fun typeCheckMultiply(mutiplyExpr: Multiply, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckMultiply(mutiplyExpr: Multiply, expectedType: Type?, context: Context): Type? {
     return typeCheckNatOperators("mul", mutiplyExpr.expr_1, mutiplyExpr.expr_2, expectedType, context)
 }
 
-fun typeCheckSubtract(subtractExpr: Subtract, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckSubtract(subtractExpr: Subtract, expectedType: Type?, context: Context): Type? {
     return typeCheckNatOperators("sub", subtractExpr.expr_1, subtractExpr.expr_2, expectedType, context)
 }
 
-fun typeCheckAdd(addExpr: Add, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckAdd(addExpr: Add, expectedType: Type?, context: Context): Type? {
     return typeCheckNatOperators("add", addExpr.expr_1, addExpr.expr_2, expectedType, context)
 }
 
-fun typeCheckTypeCast(castExpr: TypeCast, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckTypeCast(castExpr: TypeCast, expectedType: Type?, context: Context): Type? {
     val exprType = typeCheckExpression(castExpr.expr_, null, context)
 
     //TODO: Do we allow casting no matter what (no hierarchy)?
@@ -294,22 +376,23 @@ fun typeCheckTypeCast(castExpr: TypeCast, expectedType: Type?, context: MutableM
 
 }
 
-fun typeCheckLetBinding(letExpr: Let, expectedType: Type?, outerContext: MutableMap<String, Type>): Type? {
-    var innerContext = mutableMapOf<String, Type>()
+fun typeCheckLetBinding(letExpr: Let, expectedType: Type?, outerContext: Context): Type? {
+    var innerVariableContext= mutableMapOf<String, Type>()
 
     // Creating local scope
-    innerContext += parseListPatternBinding(letExpr.listpatternbinding_, outerContext)
+    innerVariableContext += parseListPatternBinding(letExpr.listpatternbinding_, outerContext)
 
     // Adding previous scope to new scope
     // Shadowing occurs naturally here as in the old values get overwritten
-    innerContext = (outerContext + innerContext) as MutableMap<String, Type>
+    var innerContext = Context(outerContext)
+    innerContext.appendVariables(innerVariableContext)
 
     val innerExprType = typeCheckExpression(letExpr.expr_, expectedType, innerContext)
 
     return innerExprType
 }
 
-fun typeCheckAssign(expr: Assign, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckAssign(expr: Assign, expectedType: Type?, context: Context): Type? {
 
     val leftExpressionType = typeCheckExpression(expr.expr_1, null, context)
     val rightExpressionType = typeCheckExpression(expr.expr_2, null, context)
@@ -340,7 +423,7 @@ fun typeCheckAssign(expr: Assign, expectedType: Type?, context: MutableMap<Strin
     }
 }
 
-fun typeCheckDeref(expr: Deref, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckDeref(expr: Deref, expectedType: Type?, context: Context): Type? {
     val innerExprType = typeCheckExpression(expr.expr_, null, context)
 
     when (innerExprType) {
@@ -367,7 +450,7 @@ fun typeCheckDeref(expr: Deref, expectedType: Type?, context: MutableMap<String,
     }
 }
 
-fun typeCheckRef(expr: Ref, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckRef(expr: Ref, expectedType: Type?, context: Context): Type? {
     val innerExprType = typeCheckExpression(expr.expr_, null, context)
     val refType = TypeRef(innerExprType)
 
@@ -384,14 +467,14 @@ fun typeCheckRef(expr: Ref, expectedType: Type?, context: MutableMap<String, Typ
     return refType
 }
 
-fun typeCheckPanic(expr: Panic, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckPanic(expr: Panic, expectedType: Type?, context: Context): Type? {
     if (expectedType == null)
         throw TypeError("Illegal expression ${PrettyPrinter.print(expr)}")
 
     return expectedType
 }
 
-fun typeCheckSequence(expr: Sequence, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckSequence(expr: Sequence, expectedType: Type?, context: Context): Type? {
     // Throw error if first branch is not TypeUnit
     typeCheckExpression(expr.expr_1, TypeUnit(), context)
 
@@ -411,7 +494,7 @@ fun typeCheckSequence(expr: Sequence, expectedType: Type?, context: MutableMap<S
     return secondBranchReturnType
 }
 
-fun typeCheckApplication(expr: Application, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckApplication(expr: Application, expectedType: Type?, context: Context): Type? {
     when (val functionType = typeCheckExpression(expr.expr_, null, context)) {
         is TypeFun -> {
             val firstArgExpectedType = functionType.listtype_[0]
@@ -443,7 +526,7 @@ fun typeCheckApplication(expr: Application, expectedType: Type?, context: Mutabl
     }
 }
 
-fun typeCheckNatRec(natRec: NatRec, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckNatRec(natRec: NatRec, expectedType: Type?, context: Context): Type? {
     typeCheckExpression(natRec.expr_1, TypeNat(), context)
     val secondExprType = typeCheckExpression(natRec.expr_2, null, context)
     val thirdExprType = typeCheckExpression(natRec.expr_3, null, context)
@@ -463,13 +546,13 @@ fun typeCheckNatRec(natRec: NatRec, expectedType: Type?, context: MutableMap<Str
     return secondExprType
 }
 
-fun typeCheckVar(variable: Var, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckVar(variable: Var, expectedType: Type?, context: Context): Type? {
     val variableName = variable.stellaident_
 
     // Try to find the variable in local scope
     // otherwise it's a function declaration
-    val variableType: Type? = if (variableName in context.keys) {
-        context[variableName]
+    val variableType: Type? = if (context.hasVariable(variableName)) {
+        context.getVariableType(variableName)
     }
     // get it from global scope
     else {
@@ -491,7 +574,7 @@ fun typeCheckVar(variable: Var, expectedType: Type?, context: MutableMap<String,
     return variableType
 }
 
-fun typeCheckRecord(record: Record, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckRecord(record: Record, expectedType: Type?, context: Context): Type? {
     val typeOfRecord = constructTypeRecord(record.listbinding_, context)
 
     if (expectedType == null)
@@ -517,7 +600,7 @@ fun typeCheckRecord(record: Record, expectedType: Type?, context: MutableMap<Str
     }
 }
 
-fun typeCheckTuple(tuple: Tuple, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckTuple(tuple: Tuple, expectedType: Type?, context: Context): Type? {
     val typeOfTuple = constructTypeTuple(tuple.listexpr_, context)
 
     if (expectedType == null)
@@ -543,7 +626,7 @@ fun typeCheckTuple(tuple: Tuple, expectedType: Type?, context: MutableMap<String
 
 }
 
-fun typeCheckDotRecord(dotRecord: DotRecord, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckDotRecord(dotRecord: DotRecord, expectedType: Type?, context: Context): Type? {
     val exprType = typeCheckExpression(dotRecord.expr_, null, context)
 
     when (exprType) {
@@ -575,7 +658,7 @@ fun typeCheckDotRecord(dotRecord: DotRecord, expectedType: Type?, context: Mutab
     }
 }
 
-fun typeCheckDotTuple(dotTuple: DotTuple, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckDotTuple(dotTuple: DotTuple, expectedType: Type?, context: Context): Type? {
     val exprType = typeCheckExpression(dotTuple.expr_, null, context)
 
     when (exprType) {
@@ -622,7 +705,7 @@ fun typeCheckDotTuple(dotTuple: DotTuple, expectedType: Type?, context: MutableM
 
 }
 
-fun typeCheckMatch(match: Match, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckMatch(match: Match, expectedType: Type?, context: Context): Type? {
     val exprType = typeCheckExpression(match.expr_, null, context)
 
     return when (exprType) {
@@ -644,8 +727,9 @@ fun typeCheckMatch(match: Match, expectedType: Type?, context: MutableMap<String
                     is AMatchCase -> {
 
                         val varTypeTuple = extractPatternVar(case.pattern_, exprType)
-                        val caseContext = mapOf(varTypeTuple.first to varTypeTuple.second)
-                        var innerContext = (context + caseContext) as MutableMap<String, Type>
+                        val caseVariableContext = mapOf(varTypeTuple.first to varTypeTuple.second) as Map<String, Type>
+                        var innerContext = Context(context)
+                        innerContext.appendVariables(caseVariableContext)
 
                         val branchType = typeCheckExpression(case.expr_, expectedType, innerContext)
 
@@ -692,7 +776,7 @@ fun extractPatternVar(pattern: Pattern, curType: Type?): Pair<String, Type?> = w
 }
 
 
-fun typeCheckInl(expr: Inl, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckInl(expr: Inl, expectedType: Type?, context: Context): Type? {
     if (expectedType == null) {
         return TypeSum(typeCheckExpression(expr.expr_, null, context), null)
     }
@@ -722,7 +806,7 @@ fun typeCheckInl(expr: Inl, expectedType: Type?, context: MutableMap<String, Typ
     }
 }
 
-fun typeCheckInr(expr: Inr, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckInr(expr: Inr, expectedType: Type?, context: Context): Type? {
     if (expectedType == null) {
         return TypeSum(null, typeCheckExpression(expr.expr_, null, context))
     }
@@ -793,7 +877,7 @@ fun typeCheckUnit(expectedType: Type?): Type? {
     return TypeUnit()
 }
 
-fun typeCheckSucc(succExpr: Succ, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckSucc(succExpr: Succ, expectedType: Type?, context: Context): Type? {
 
     if (expectedType == null)
         return typeCheckExpression(succExpr.expr_, TypeNat(), context)
@@ -814,7 +898,7 @@ fun typeCheckSucc(succExpr: Succ, expectedType: Type?, context: MutableMap<Strin
     return succContentType
 }
 
-fun typeCheckIsZero(isZeroExpr: IsZero, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckIsZero(isZeroExpr: IsZero, expectedType: Type?, context: Context): Type? {
 
     if (expectedType == null)
         return typeCheckExpression(isZeroExpr.expr_, TypeBool(), context)
@@ -834,7 +918,7 @@ fun typeCheckIsZero(isZeroExpr: IsZero, expectedType: Type?, context: MutableMap
     return isZeroContentType
 }
 
-fun typeCheckIf(ifExpr: If, expectedType: Type?, context: MutableMap<String, Type>): Type? {
+fun typeCheckIf(ifExpr: If, expectedType: Type?, context: Context): Type? {
     val condition = ifExpr.expr_1
     val firstBranch = ifExpr.expr_2
     val secondBranch = ifExpr.expr_3
@@ -857,17 +941,18 @@ fun typeCheckIf(ifExpr: If, expectedType: Type?, context: MutableMap<String, Typ
     return mostGeneralType
 }
 
-fun typeCheckAbstraction(abstraction: Abstraction, expectedType: Type?, outerContext: MutableMap<String, Type>): Type? {
-    var innerContext = mutableMapOf<String, Type>()
+fun typeCheckAbstraction(abstraction: Abstraction, expectedType: Type?, outercontext: Context): Type? {
+    var innerVariableContext = mutableMapOf<String, Type>()
 
     // Creating local scope
     for (paramDecl in abstraction.listparamdecl_) {
-        innerContext += parseParamDecl(paramDecl)
+        innerVariableContext += parseParamDecl(paramDecl, outercontext)
     }
 
     // Adding previous scope to new scope
     // Shadowing occurs naturally here as in the old values get overwritten
-    innerContext = (outerContext + innerContext) as MutableMap<String, Type>
+    var innerContext = Context(outercontext)
+    innerContext.appendVariables(innerVariableContext)
 
     val innerExpr = abstraction.expr_
     val firstParam = abstraction.listparamdecl_[0] as AParamDecl
@@ -952,7 +1037,7 @@ fun accessRecord(dotRecord: DotRecord, fieldAccessed: String, recordType: TypeRe
 // Given a
 fun parseListPatternBinding(
     listPatternBinding: ListPatternBinding,
-    context: MutableMap<String, Type>
+    context: Context
 ): MutableMap<String, Type> {
     var mapPatternBinding = mutableMapOf<String, Type>()
 
@@ -979,7 +1064,7 @@ fun constructTypeFun(argType: Type?, returnType: Type?): TypeFun {
 }
 
 // Constructs a TypeTuple given its list of expressions and the current context
-fun constructTypeTuple(tupleExpressions: ListExpr, context: MutableMap<String, Type>): TypeTuple {
+fun constructTypeTuple(tupleExpressions: ListExpr, context: Context): TypeTuple {
     val exprListType = ListType()
 
     for (expr in tupleExpressions) {
@@ -990,7 +1075,7 @@ fun constructTypeTuple(tupleExpressions: ListExpr, context: MutableMap<String, T
 }
 
 // Constructs a TypeRecord given its list of bindings and the current context
-fun constructTypeRecord(recordListBinding: ListBinding, context: MutableMap<String, Type>): TypeRecord {
+fun constructTypeRecord(recordListBinding: ListBinding, context: Context): TypeRecord {
     val recordListRecordFieldType = ListRecordFieldType()
 
     for (binding in recordListBinding) {
