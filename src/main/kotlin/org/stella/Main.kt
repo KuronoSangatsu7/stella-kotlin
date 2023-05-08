@@ -41,7 +41,7 @@ fun main(args: Array<String> = emptyArray()) {
 
     try {
         val ast: Program = p.start_Program().result
-        val typeChecker = TypeCheck
+        val typeChecker = TypeCheck()
         val evaluator = Eval
         typeChecker.typeCheckProgram(ast)
         if (args.isNotEmpty()) {
