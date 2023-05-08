@@ -6,6 +6,7 @@ import org.syntax.stella.PrettyPrinter
 
 class TypeError(message: String) : Exception(message)
 
+@Suppress("UNUSED")
 fun debug(arg: Any?) {
     val className = Throwable().stackTrace[1].className
     val methodName = Throwable().stackTrace[1].methodName
@@ -81,7 +82,8 @@ class GlobalContext {
     }
 }
 
-@Suppress("UNUSED") class Context {
+@Suppress("UNUSED")
+class Context {
     private var variables: MutableMap<String, Type> = mutableMapOf()
     private var availableGenericTypes: MutableList<String> = mutableListOf()
 
@@ -284,7 +286,7 @@ class TypeCheck {
         is NatRec -> typeCheckNatRec(expr, expectedType, context)
         is IsZero -> typeCheckIsZero(expr, expectedType, context)
         is Abstraction -> typeCheckAbstraction(expr, expectedType, context)
-        is TypeAbstraction -> typeCheckTypeAbstraction(expr, expectedType, context)
+        is TypeAbstraction -> typeCheckTypeAbstraction(expr, context)
         is Application -> typeCheckApplication(expr, expectedType, context)
         is TypeApplication -> typeCheckTypeApplication(expr, context)
         is Sequence -> typeCheckSequence(expr, expectedType, context)
@@ -309,64 +311,94 @@ class TypeCheck {
 
     // Given any arbitrary Type, a variable identifier, and a new type to apply
     // Replaces all occurrences of the variable within the given type to the new type
-    private fun replaceVarType(originalType: Type?, varIdent: String = "", varType: Type? = null): Type? = when (originalType) {
-        // TODO: Other types could be supported here
-        is TypeFun -> constructTypeFun(
-            replaceVarType(originalType.listtype_[0], varIdent, varType),
-            replaceVarType(originalType.type_, varIdent, varType)
-        )
+    private fun replaceVarType(
+        originalType: Type?,
+        varIdent: String,
+        varType: Type?,
+        depth: Int = 0,
+        swappedBefore: Boolean = false
+    ): Type? =
+        when (originalType) {
+            // TODO: Other types could be supported here
+            is TypeFun -> constructTypeFun(
+                replaceVarType(originalType.listtype_[0], varIdent, varType, depth),
+                replaceVarType(originalType.type_, varIdent, varType, depth)
+            )
 
-        is TypeSum -> TypeSum(
-            replaceVarType(originalType.type_1, varIdent, varType),
-            replaceVarType(originalType.type_2, varIdent, varType)
-        )
+            is TypeSum -> TypeSum(
+                replaceVarType(originalType.type_1, varIdent, varType, depth),
+                replaceVarType(originalType.type_2, varIdent, varType, depth)
+            )
 
-        is TypeTuple -> TypeTuple(ListType().apply {
-            addAll(originalType.listtype_.map { element ->
-                replaceVarType(
-                    element,
-                    varIdent,
-                    varType
-                )
-            })
-        })
-
-        is TypeRecord -> TypeRecord(ListRecordFieldType().apply {
-            addAll(originalType.listrecordfieldtype_.map { element ->
-                when (element) {
-                    is ARecordFieldType -> ARecordFieldType(
-                        element.stellaident_,
-                        replaceVarType(element.type_, varIdent, varType)
+            is TypeTuple -> TypeTuple(ListType().apply {
+                addAll(originalType.listtype_.map { element ->
+                    replaceVarType(
+                        element,
+                        varIdent,
+                        varType,
+                        depth
                     )
-
-                    else -> null
-                }
+                })
             })
-        })
 
-        is TypeBool -> TypeBool()
-        is TypeNat -> TypeNat()
-        is TypeUnit -> TypeUnit()
-        is TypeTop -> TypeTop()
-        is TypeBottom -> TypeBottom()
-        is TypeRef -> TypeRef(replaceVarType(originalType.type_, varIdent, varType))
-        is TypeVar -> if (originalType.stellaident_ == varIdent) varType else originalType
-        // TODO: Shadowing here, tg gc example
-        is TypeForAll -> {
-            when (originalType.type_) {
-                is TypeForAll -> {
-                    if (varIdent in originalType.type_.liststellaident_)
-                        originalType
-                    else
-                        TypeForAll(originalType.liststellaident_, replaceVarType(originalType.type_, varIdent, varType))
-                }
+            is TypeRecord -> TypeRecord(ListRecordFieldType().apply {
+                addAll(originalType.listrecordfieldtype_.map { element ->
+                    when (element) {
+                        is ARecordFieldType -> ARecordFieldType(
+                            element.stellaident_,
+                            replaceVarType(element.type_, varIdent, varType, depth)
+                        )
 
-                else -> TypeForAll(originalType.liststellaident_, replaceVarType(originalType.type_, varIdent, varType))
+                        else -> null
+                    }
+                })
+            })
+
+            is TypeBool -> TypeBool()
+            is TypeNat -> TypeNat()
+            is TypeUnit -> TypeUnit()
+            is TypeTop -> TypeTop()
+            is TypeBottom -> TypeBottom()
+            is TypeRef -> TypeRef(replaceVarType(originalType.type_, varIdent, varType, depth))
+            is TypeVar -> if (originalType.stellaident_ == varIdent) varType else originalType
+
+            is TypeForAll -> {
+
+                if (varIdent in originalType.liststellaident_ && swappedBefore)
+                    originalType
+                else if (varType is TypeVar && varType.stellaident_ in originalType.liststellaident_) {
+                    val newVarIdent = varType.stellaident_ + depth.toString()
+                    val oldVarIdent = varType.stellaident_
+                    val oldListStellaIdent = originalType.liststellaident_
+
+                    val newListStellaIdent = oldListStellaIdent.map {
+                        if (it == oldVarIdent) newVarIdent else it
+                    }.toCollection(ListStellaIdent())
+
+                    var ret = TypeForAll(
+                        newListStellaIdent,
+                        replaceVarType(
+                            originalType.type_,
+                            oldVarIdent,
+                            TypeVar(newVarIdent),
+                            depth + 1,
+                            swappedBefore = true
+                        )
+                    )
+                    ret = TypeForAll(
+                        ret.liststellaident_,
+                        replaceVarType(ret.type_, varIdent, varType, depth + 1, swappedBefore = true)
+                    )
+                    ret
+                } else
+                    TypeForAll(
+                        originalType.liststellaident_,
+                        replaceVarType(originalType.type_, varIdent, varType, depth, swappedBefore = true)
+                    )
             }
-        }
 
-        else -> null
-    }
+            else -> null
+        }
 
     private fun compareWithSubtyping(subType: Type?, superType: Type?): Boolean {
         if (superType is TypeTop)
@@ -713,14 +745,12 @@ class TypeCheck {
 
                 if (expectedType == null)
                     return applicationReturnType
-
                 if (!compareWithSubtyping(applicationReturnType, expectedType))
                     throw TypeError(
                         "Expected type ${PrettyPrinter.print(expectedType)}\n" +
                                 "Instead found ${PrettyPrinter.print(applicationReturnType)}\n" +
                                 "in expression ${PrettyPrinter.print(expr)}"
                     )
-
                 return applicationReturnType
             }
 
@@ -750,9 +780,11 @@ class TypeCheck {
         }
 
         if (!compareWithSubtyping(secondExprType, expectedType))
-            throw TypeError("Expected type ${PrettyPrinter.print(expectedType)}" +
-                    "Instead found type ${PrettyPrinter.print(secondExprType)}" +
-                    "In Expression ${PrettyPrinter.print(natRec)}")
+            throw TypeError(
+                "Expected type ${PrettyPrinter.print(expectedType)}" +
+                        "Instead found type ${PrettyPrinter.print(secondExprType)}" +
+                        "In Expression ${PrettyPrinter.print(natRec)}"
+            )
 
         return secondExprType
     }
@@ -1083,7 +1115,7 @@ class TypeCheck {
         return TypeUnit()
     }
 
-    private fun typeCheckNatFunction(expr: Expr, expectedType: Type?,context: Context): Type? {
+    private fun typeCheckNatFunction(expr: Expr, expectedType: Type?, context: Context): Type? {
         if (expectedType == null)
             return typeCheckExpression(expr, TypeNat(), context)
 
@@ -1145,8 +1177,11 @@ class TypeCheck {
             )
     }
 
-    private fun typeCheckTypeAbstraction(typeAbstraction: TypeAbstraction, expectedType: Type?, outerContext: Context): Type {
-
+    private fun typeCheckTypeAbstraction(
+        typeAbstraction: TypeAbstraction,
+        outerContext: Context
+    ): Type {
+        debug(typeAbstraction)
         val genericTypes = typeAbstraction.liststellaident_
         val innerGenerics = mutableListOf<String>()
         for (generic in genericTypes)
@@ -1156,15 +1191,9 @@ class TypeCheck {
         innerContext.appendTypes(innerGenerics)
 
         val exprType = typeCheckExpression(typeAbstraction.expr_, null, innerContext)
+
         // Wrap inner type with Forall
-        val actualType = TypeForAll(genericTypes, exprType)
-
-        if (!compareWithSubtyping(actualType, expectedType))
-            throw TypeError("Expected type ${PrettyPrinter.print(expectedType)}" +
-                    "Instead found type ${PrettyPrinter.print(actualType)}" +
-                    "In expression ${PrettyPrinter.print(typeAbstraction)}")
-
-        return actualType
+        return TypeForAll(genericTypes, exprType)
     }
 
     private fun typeCheckAbstraction(abstraction: Abstraction, expectedType: Type?, outerContext: Context): Type {
