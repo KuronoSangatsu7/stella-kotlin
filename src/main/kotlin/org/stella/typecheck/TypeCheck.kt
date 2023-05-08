@@ -1,15 +1,91 @@
 package org.stella.typecheck
 
 import org.syntax.stella.Absyn.*
+import org.syntax.stella.Absyn.Annotation
 import org.syntax.stella.PrettyPrinter
 
 class TypeError(message: String) : Exception(message)
 
-var globalContext = mutableMapOf<String, Type>();
+fun debug(arg: Any?) {
+    val className = Throwable().stackTrace[1].className
+    val methodName = Throwable().stackTrace[1].methodName
+
+    val output = try {
+        when (arg) {
+            is Annotation -> PrettyPrinter.print(arg)
+            is Binding -> PrettyPrinter.print(arg)
+            is Decl -> PrettyPrinter.print(arg)
+            is Expr -> PrettyPrinter.print(arg)
+            is ExprData -> PrettyPrinter.print(arg)
+            is Extension -> PrettyPrinter.print(arg)
+            is LabelledPattern -> PrettyPrinter.print(arg)
+            is LanguageDecl -> PrettyPrinter.print(arg)
+            is ListAnnotation -> PrettyPrinter.print(arg)
+            is ListBinding -> PrettyPrinter.print(arg)
+            is ListDecl -> PrettyPrinter.print(arg)
+            is ListExpr -> PrettyPrinter.print(arg)
+            is ListExtension -> PrettyPrinter.print(arg)
+            is ListExtensionName -> PrettyPrinter.print(arg)
+            is ListLabelledPattern -> PrettyPrinter.print(arg)
+            is ListLocalDecl -> PrettyPrinter.print(arg)
+            is ListMatchCase -> PrettyPrinter.print(arg)
+            is ListParamDecl -> PrettyPrinter.print(arg)
+            is ListPattern -> PrettyPrinter.print(arg)
+            is ListPatternBinding -> PrettyPrinter.print(arg)
+            is ListRecordFieldType -> PrettyPrinter.print(arg)
+            is ListStellaIdent -> PrettyPrinter.print(arg)
+            is ListType -> PrettyPrinter.print(arg)
+            is ListVariantFieldType -> PrettyPrinter.print(arg)
+            is LocalDecl -> PrettyPrinter.print(arg)
+            is MatchCase -> PrettyPrinter.print(arg)
+            is OptionalTyping -> PrettyPrinter.print(arg)
+            is ParamDecl -> PrettyPrinter.print(arg)
+            is Pattern -> PrettyPrinter.print(arg)
+            is PatternBinding -> PrettyPrinter.print(arg)
+            is PatternData -> PrettyPrinter.print(arg)
+            is Program -> PrettyPrinter.print(arg)
+            is RecordFieldType -> PrettyPrinter.print(arg)
+            is ReturnType -> PrettyPrinter.print(arg)
+            is ThrowType -> PrettyPrinter.print(arg)
+            is Type -> PrettyPrinter.print(arg)
+            is Typing -> PrettyPrinter.print(arg)
+            is VariantFieldType -> PrettyPrinter.print(arg)
+            else -> arg
+        }
+    } catch (e: Exception) {
+        print(arg)
+    }
+
+    println("DEBUGGING FROM $className.$methodName:")
+    println(output)
+}
+
+class GlobalContext() {
+    private var functionTypes: MutableMap<String, Type> = mutableMapOf()
+    private var functionGenericTypes: MutableMap<String, List<String>> = mutableMapOf()
+
+    fun appendFunction(funcIdent: String, funcType: Type) {
+        this.functionTypes += mapOf<String, Type>(funcIdent to funcType)
+    }
+
+    fun appendFunctionGenerics(funcIdent: String, generics: List<String>) {
+        this.functionGenericTypes += mapOf<String, List<String>>(funcIdent to generics)
+    }
+
+    fun getFunctionType(funcIdent: String): Type? {
+        return this.functionTypes.getOrDefault(funcIdent, null)
+    }
+
+    fun getFunctionGenerics(funcIdent: String): List<String> {
+        return this.functionGenericTypes.getOrDefault(funcIdent, listOf())
+    }
+}
+
+var globalContext = GlobalContext();
 
 class Context {
     private var variables: MutableMap<String, Type> = mutableMapOf()
-    private var genericTypes: MutableList<String> = mutableListOf()
+    private var availableGenericTypes: MutableList<String> = mutableListOf()
 
     constructor()
 
@@ -17,34 +93,29 @@ class Context {
         this.variables += initialVariables
     }
 
-    constructor(initialTypes: List<String>) {
-        this.genericTypes.addAll(initialTypes)
-    }
-
-    constructor(initialVariables: Map<String, Type>, initialTypes: List<String>) {
-        this.variables += initialVariables
-        this.genericTypes.addAll(initialTypes)
+    constructor(initialAvailableTypes: List<String>) {
+        this.availableGenericTypes.addAll(initialAvailableTypes)
     }
 
     constructor(oldContext: Context) {
         this.variables = oldContext.variables
-        this.genericTypes = oldContext.genericTypes
+        this.availableGenericTypes = oldContext.availableGenericTypes
     }
 
     fun appendVariables(newVariables: Map<String, Type>) {
         this.variables += newVariables
     }
-    
+
     fun appendTypes(newTypes: List<String>) {
-        this.genericTypes.addAll(newTypes)
+        this.availableGenericTypes.addAll(newTypes)
     }
 
     fun getVariableType(varIdent: String): Type? {
         return this.variables[varIdent]
     }
-    
+
     fun hasType(typeIdent: String): Boolean {
-        return (typeIdent in this.genericTypes)
+        return (typeIdent in this.availableGenericTypes)
     }
 
     fun hasVariable(varIdent: String): Boolean {
@@ -73,20 +144,14 @@ fun typeCheckFunctionDeclaration(decl: DeclFun) {
 }
 
 fun typeCheckGenericFunctionDeclaration(decl: DeclFunGeneric) {
-    //TODO: implement dis
-    // return type decl.returntype_
-    // return expr decl.expr_
-    // params decl.listparamdecl_
-    // list of generic types to be defined inside decl.liststellaident_
-
-
     var genericTypeContext = mutableListOf<String>()
     // add generic types to context
     for (ident in decl.liststellaident_)
         genericTypeContext.add(ident)
-    
+
     var context = Context(genericTypeContext)
-    
+    globalContext.appendFunctionGenerics(decl.stellaident_, genericTypeContext)
+
     typeCheckFunction(decl.returntype_, decl.listparamdecl_, decl.stellaident_, decl.expr_, context)
 }
 
@@ -98,7 +163,6 @@ fun typeCheckFunction(
     context: Context
 ) {
     val variableContext = mutableMapOf<String, Type>()
-
     var returnType = when (returnType) {
         is SomeReturnType -> {
             returnType.type_
@@ -106,6 +170,10 @@ fun typeCheckFunction(
 
         else -> throw TypeError("A function declaration must specify its return type.")
     }
+
+    // Will never throw here with valid input
+    if (!isValidType(returnType, context))
+        throw TypeError("Unexpected Type Error")
 
     for (paramDecl in params) {
         var params = parseParamDecl(paramDecl, context)
@@ -117,29 +185,81 @@ fun typeCheckFunction(
 
         // Add function signature to global context
         var functionType = constructTypeFun(paramType, returnType)
-        globalContext[funcIdent] = functionType
+        globalContext.appendFunction(funcIdent, functionType)
     }
-    
+
     context.appendVariables(variableContext)
-    
-    typeCheckExpression(returnExpr, returnType, context)
+    debug(globalContext.getFunctionType("identity"))
+    var actualReturnType = typeCheckExpression(returnExpr, returnType, context)
+
+    if (!compareWithSubtyping(actualReturnType, returnType))
+        throw TypeError(
+            "Expected type ${PrettyPrinter.print(returnType)}" +
+                    "Instead found type ${PrettyPrinter.print(actualReturnType)}" +
+                    "In Expression ${PrettyPrinter.print(returnExpr)}"
+        )
 }
 
 // Writes the given parameter declarations into a map to act as the function's local scope later on
 fun parseParamDecl(paramDecl: ParamDecl, context: Context): Map<String, Type> = when (paramDecl) {
     is AParamDecl -> {
-        when (val type = paramDecl.type_) {
-            is TypeVar -> {
-                if (context.hasType(type.stellaident_)) {
-                    mapOf(paramDecl.stellaident_ to paramDecl.type_)
-                } else throw TypeError("unknown type alias ${type.stellaident_}")
-            }
+        if (isValidType(paramDecl.type_, context))
+            mapOf(paramDecl.stellaident_ to paramDecl.type_)
 
-            else -> mapOf(paramDecl.stellaident_ to paramDecl.type_)
-        }
+        // Will never reach else branch with valid input
+        else
+            mapOf()
+        //throw TypeError("Unexpected Type Error")
     }
 
     else -> mapOf()
+}
+
+// a function, that, given a type and context, validates that the given types does not use any
+// Undefined TypeVar
+fun isValidType(givenType: Type?, context: Context): Boolean = when (givenType) {
+    // TODO: Add other types later on
+    is TypeFun ->
+        isValidType(givenType.listtype_[0], context) && isValidType(givenType.type_, context)
+
+    is TypeSum ->
+        isValidType(givenType.type_1, context) &&
+                isValidType(givenType.type_2, context)
+
+    is TypeTuple -> givenType.listtype_.map { element ->
+        isValidType(
+            element,
+            context
+        )
+    }.all { it }
+
+    is TypeRecord -> givenType.listrecordfieldtype_.map { element ->
+        when (element) {
+            is ARecordFieldType ->
+                isValidType(element.type_, context)
+
+            else -> false
+        }
+    }.all { it }
+
+    is TypeBool -> true
+    is TypeNat -> true
+    is TypeUnit -> true
+    is TypeTop -> true
+    is TypeBottom -> true
+    is TypeRef -> isValidType(givenType.type_, context)
+    is TypeVar ->
+        if (context.hasType(givenType.stellaident_))
+            true
+        else
+            throw TypeError("unknown type alias ${givenType.stellaident_}")
+    // TODO: this might be wrong
+    is TypeForAll -> {
+        context.appendTypes(givenType.liststellaident_)
+        isValidType(givenType.type_, context)
+    }
+
+    else -> false
 }
 
 // Typechecks a given expression against the provided expectedType using the given local/global scopes
@@ -158,6 +278,7 @@ fun typeCheckExpression(expr: Expr, expectedType: Type?, context: Context): Type
     is ConstInt -> typeCheckInt(expr, expectedType)
     is ConstUnit -> typeCheckUnit(expectedType)
     is Succ -> typeCheckSucc(expr, expectedType, context)
+    is Pred -> typeCheckPred(expr, expectedType, context)
     is If -> typeCheckIf(expr, expectedType, context)
     is Match -> typeCheckMatch(expr, expectedType, context)
     is Inl -> typeCheckInl(expr, expectedType, context)
@@ -165,7 +286,9 @@ fun typeCheckExpression(expr: Expr, expectedType: Type?, context: Context): Type
     is NatRec -> typeCheckNatRec(expr, expectedType, context)
     is IsZero -> typeCheckIsZero(expr, expectedType, context)
     is Abstraction -> typeCheckAbstraction(expr, expectedType, context)
+    is TypeAbstraction -> typeCheckTypeAbstraction(expr, expectedType, context)
     is Application -> typeCheckApplication(expr, expectedType, context)
+    is TypeApplication -> typeCheckTypeApplication(expr, expectedType, context)
     is Sequence -> typeCheckSequence(expr, expectedType, context)
     is Panic -> typeCheckPanic(expr, expectedType, context)
     is Ref -> typeCheckRef(expr, expectedType, context)
@@ -186,8 +309,68 @@ fun typeCheckExpression(expr: Expr, expectedType: Type?, context: Context): Type
     else -> null
 }
 
+// Given any arbitrary Type, a variable identifier, and a new type to apply
+// Replaces all occurrences of the variable within the given type to the new type
+fun replaceVarType(originalType: Type?, varIdent: String = "", varType: Type? = null): Type? = when (originalType) {
+    // TODO: Add other types later on
+    is TypeFun -> constructTypeFun(
+        replaceVarType(originalType.listtype_[0], varIdent, varType),
+        replaceVarType(originalType.type_, varIdent, varType)
+    )
+
+    is TypeSum -> TypeSum(
+        replaceVarType(originalType.type_1, varIdent, varType),
+        replaceVarType(originalType.type_2, varIdent, varType)
+    )
+
+    is TypeTuple -> TypeTuple(ListType().apply {
+        addAll(originalType.listtype_.map { element ->
+            replaceVarType(
+                element,
+                varIdent,
+                varType
+            )
+        })
+    })
+
+    is TypeRecord -> TypeRecord(ListRecordFieldType().apply {
+        addAll(originalType.listrecordfieldtype_.map { element ->
+            when (element) {
+                is ARecordFieldType -> ARecordFieldType(
+                    element.stellaident_,
+                    replaceVarType(element.type_, varIdent, varType)
+                )
+
+                else -> null
+            }
+        })
+    })
+
+    is TypeBool -> TypeBool()
+    is TypeNat -> TypeNat()
+    is TypeUnit -> TypeUnit()
+    is TypeTop -> TypeTop()
+    is TypeBottom -> TypeBottom()
+    is TypeRef -> TypeRef(replaceVarType(originalType.type_, varIdent, varType))
+    is TypeVar -> if (originalType.stellaident_ == varIdent) varType else originalType
+    // TODO: Shadowing here, tg gc example
+    is TypeForAll -> {
+        when (originalType.type_) {
+            is TypeForAll -> {
+                if (varIdent in originalType.type_.liststellaident_)
+                    originalType
+                else
+                    TypeForAll(originalType.liststellaident_, replaceVarType(originalType.type_, varIdent, varType))
+            }
+
+            else -> TypeForAll(originalType.liststellaident_, replaceVarType(originalType.type_, varIdent, varType))
+        }
+    }
+
+    else -> null
+}
+
 fun compareWithSubtyping(subType: Type?, superType: Type?): Boolean {
-    // TODO: implement type casting to use TypeTop
     if (superType is TypeTop)
         return true
 
@@ -377,7 +560,7 @@ fun typeCheckTypeCast(castExpr: TypeCast, expectedType: Type?, context: Context)
 }
 
 fun typeCheckLetBinding(letExpr: Let, expectedType: Type?, outerContext: Context): Type? {
-    var innerVariableContext= mutableMapOf<String, Type>()
+    var innerVariableContext = mutableMapOf<String, Type>()
 
     // Creating local scope
     innerVariableContext += parseListPatternBinding(letExpr.listpatternbinding_, outerContext)
@@ -494,6 +677,34 @@ fun typeCheckSequence(expr: Sequence, expectedType: Type?, context: Context): Ty
     return secondBranchReturnType
 }
 
+fun typeCheckTypeApplication(expr: TypeApplication, expectedType: Type?, context: Context): Type? {
+    var exprType = typeCheckExpression(expr.expr_, null, context)
+    when (exprType) {
+        is TypeForAll -> {
+            val appliedTypes = expr.listtype_
+            val typeVars = exprType.liststellaident_
+
+            if (appliedTypes.size != typeVars.size)
+                throw TypeError(
+                    "Expected ${typeVars.size} type parameters\n" +
+                            "Instead found ${appliedTypes.size} type parameters\n" +
+                            "In the type application ${PrettyPrinter.print(expr)}"
+                )
+
+            var returnType = exprType as TypeForAll
+            for (typePair in typeVars.zip(appliedTypes))
+            // replaceVarType is guaranteed to return TypeForAll when passed a TypeForAll
+                returnType = replaceVarType(returnType, typePair.first, typePair.second) as TypeForAll
+            // Unwrap Forall type after replacement of variables
+            return returnType.type_
+        }
+
+        else -> null
+    }
+
+    return null
+}
+
 fun typeCheckApplication(expr: Application, expectedType: Type?, context: Context): Type? {
     when (val functionType = typeCheckExpression(expr.expr_, null, context)) {
         is TypeFun -> {
@@ -516,13 +727,10 @@ fun typeCheckApplication(expr: Application, expectedType: Type?, context: Contex
             return applicationReturnType
         }
 
-        else -> {
-            throw TypeError(
-                "${PrettyPrinter.print(expr.expr_)} cannot " +
-                        "be applied to ${PrettyPrinter.print(expr.listexpr_[0])}\n" +
-                        "${PrettyPrinter.print(expr.expr_)} is not a function."
-            )
-        }
+        else -> throw TypeError(
+                "${PrettyPrinter.print(expr.listexpr_[0])} cannot " +
+                        "be applied to ${PrettyPrinter.print(expr.expr_)} \n" +
+                        "${PrettyPrinter.print(expr.expr_)} is not a function.")
     }
 }
 
@@ -556,7 +764,17 @@ fun typeCheckVar(variable: Var, expectedType: Type?, context: Context): Type? {
     }
     // get it from global scope
     else {
-        globalContext[variableName]
+
+        var funType = globalContext.getFunctionType(variableName)
+        var funGenerics = globalContext.getFunctionGenerics(variableName)
+
+        if (funGenerics.isEmpty())
+            funType
+        // Wrap the types of generic functions with Forall
+        else {
+            funType = TypeForAll(ListStellaIdent().apply { addAll(funGenerics) }, funType)
+            funType
+        }
     }
 
     if (expectedType == null) {
@@ -898,6 +1116,25 @@ fun typeCheckSucc(succExpr: Succ, expectedType: Type?, context: Context): Type? 
     return succContentType
 }
 
+fun typeCheckPred(predExpr: Pred, expectedType: Type?, context: Context): Type? {
+    if (expectedType == null)
+        return typeCheckExpression(predExpr.expr_, TypeNat(), context)
+
+    when (expectedType) {
+        !is TypeNat -> throw TypeError(
+            "Expected type ${PrettyPrinter.print(expectedType)}\n" +
+                    "Instead found argument of type Nat"
+        )
+
+    }
+
+    val predExpr = predExpr.expr_
+
+    val predContentType = typeCheckExpression(predExpr, TypeNat(), context)
+
+    return predContentType
+}
+
 fun typeCheckIsZero(isZeroExpr: IsZero, expectedType: Type?, context: Context): Type? {
 
     if (expectedType == null)
@@ -939,6 +1176,21 @@ fun typeCheckIf(ifExpr: If, expectedType: Type?, context: Context): Type? {
     // Throw error if inferred types of the 2 branches do not match
 
     return mostGeneralType
+}
+
+fun typeCheckTypeAbstraction(typeAbstraction: TypeAbstraction, expectedType: Type?, outerContext: Context): Type? {
+
+    val genericTypes = typeAbstraction.liststellaident_
+    val innerGenerics = mutableListOf<String>()
+    for (generic in genericTypes)
+        innerGenerics.add(generic)
+
+    val innerContext = Context(outerContext)
+    innerContext.appendTypes(innerGenerics)
+
+    var exprType = typeCheckExpression(typeAbstraction.expr_, null, innerContext)
+    // Wrap inner type with Forall
+    return TypeForAll(genericTypes, exprType)
 }
 
 fun typeCheckAbstraction(abstraction: Abstraction, expectedType: Type?, outercontext: Context): Type? {
