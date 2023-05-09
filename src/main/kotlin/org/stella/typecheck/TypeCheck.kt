@@ -1181,7 +1181,6 @@ class TypeCheck {
         typeAbstraction: TypeAbstraction,
         outerContext: Context
     ): Type {
-        debug(typeAbstraction)
         val genericTypes = typeAbstraction.liststellaident_
         val innerGenerics = mutableListOf<String>()
         for (generic in genericTypes)
